@@ -1,6 +1,10 @@
 import { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ThumbsUp, ThumbsDown, ArrowUpRight, Layers, Plus, HelpCircle, LogIn, ShieldCheck, X, Upload, History, ChevronLeft, ChevronRight, Calendar, Image as ImageIcon, Loader2, Trash2, Check } from 'lucide-react';
+import { 
+  ThumbsUp, ThumbsDown, ArrowUpRight, Layers, Plus, HelpCircle, LogIn, 
+  ShieldCheck, X, Upload, History, ChevronLeft, ChevronRight, Calendar, 
+  Image as ImageIcon, Loader2, Trash2, Check, LogOut, MessageSquare, Share2
+} from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { type User } from '@supabase/supabase-js';
 import { clsx, type ClassValue } from 'clsx';
@@ -395,61 +399,34 @@ export default function App() {
       return;
     }
 
+    const originalVoteType = userVotes[id];
     setIsVoting(id);
+
     try {
-      // Prevent self-voting
-      const targetVibe = vibes.find(v => v.id === id) || dailyTopVibes.find(v => v.id === id);
-      if (targetVibe && targetVibe.user_id === user.id) {
-        toast.error("You cannot vote on your own Vibe! Let the community decide. 😉");
-        return;
-      }
-
-      // Use local userVotes cache instead of querying DB
-      const existingVoteType = userVotes[id];
-
-      if (existingVoteType) {
-        if (existingVoteType === type) {
-          // Cancel vote
-          const { error } = await supabase
-            .from('vibe_votes')
-            .delete()
-            .eq('vibe_id', id)
-            .eq('user_id', user.id);
-          if (error) throw error;
-          
-          setUserVotes(prev => {
-            const next = { ...prev };
-            delete next[id];
-            return next;
-          });
+      // 1. Optimistic Update UI Immediately
+      if (originalVoteType) {
+        if (originalVoteType === type) {
+          // Cancel
+          setUserVotes(prev => { const n = { ...prev }; delete n[id]; return n; });
           updateLocalVibeCounts(id, type === 'up' ? { likes: -1 } : { dislikes: -1 });
+          await supabase.from('vibe_votes').delete().eq('vibe_id', id).eq('user_id', user.id);
         } else {
-          // Swap vote
-          const { error } = await supabase
-            .from('vibe_votes')
-            .update({ vote_type: type })
-            .eq('vibe_id', id)
-            .eq('user_id', user.id);
-          if (error) throw error;
-
+          // Swap
           setUserVotes(prev => ({ ...prev, [id]: type }));
           updateLocalVibeCounts(id, type === 'up' ? { likes: 1, dislikes: -1 } : { likes: -1, dislikes: 1 });
+          await supabase.from('vibe_votes').update({ vote_type: type }).eq('vibe_id', id).eq('user_id', user.id);
         }
       } else {
-        // New vote — use upsert to avoid duplicate key errors from race conditions
-        const { error } = await supabase
-          .from('vibe_votes')
-          .upsert(
-            { vibe_id: id, user_id: user.id, vote_type: type },
-            { onConflict: 'vibe_id,user_id' }
-          );
-        if (error) throw error;
-
+        // New vote
         setUserVotes(prev => ({ ...prev, [id]: type }));
         updateLocalVibeCounts(id, type === 'up' ? { likes: 1 } : { dislikes: 1 });
+        await supabase.from('vibe_votes').upsert({ vibe_id: id, user_id: user.id, vote_type: type }, { onConflict: 'vibe_id,user_id' });
       }
-    } catch (error: any) {
-      toast.error('Failed to update vote: ' + error.message);
+    } catch (e: any) {
+      toast.error('Sync failed: ' + e.message);
+      // Rollback on error
+      fetchUserVotes(user.id);
+      fetchVibes(0, true);
     } finally {
       setIsVoting(null);
     }
@@ -722,47 +699,29 @@ export default function App() {
               <h2 className="text-xl font-bold text-white mb-4 uppercase tracking-widest flex items-center gap-3">
                 <ShieldCheck className="text-vibe-accent" size={20} /> 1. Data Collection
               </h2>
-              <p>
-                To provide a secure and authentic environment for the Vibe Coding community, we collect minimal data through Google OAuth. This includes your <strong>email address and basic profile name</strong>. We do not store your Google password or any other sensitive personal information.
-              </p>
+              <p>To provide a secure environment, we collect minimal data through Google OAuth (email and profile name).</p>
             </section>
-
             <section>
               <h2 className="text-xl font-bold text-white mb-4 uppercase tracking-widest flex items-center gap-3">
                 <Layers className="text-vibe-accent" size={20} /> 2. Content Ownership
               </h2>
-              <p>
-                Every project ("Vibe") you upload—including screenshots, descriptions, and technology stacks—remains your property. By exhibiting on Vibe Gallery, you grant the community permission to view, vote, and provide feedback on your work.
-              </p>
+              <p>Every "Vibe" you upload remains your property. You grant the community permission to view and vote.</p>
             </section>
-
             <section>
               <h2 className="text-xl font-bold text-white mb-4 uppercase tracking-widest flex items-center gap-3">
-                <Plus className="text-vibe-accent" size={20} /> 3. Information Processing
+                <Plus className="text-vibe-accent" size={20} /> 3. Processing
               </h2>
-              <p>
-                Your data is used solely for:
-              </p>
-              <ul className="list-disc pl-6 mt-4 space-y-2">
-                <li>Verifying your entry into the Vibe Gallery network.</li>
-                <li>Displaying your work in the community exhibit.</li>
-                <li>Calculating daily "Spotlight" rankings based on community likes.</li>
-                <li>Enabling anonymous feedback loops via comments.</li>
-              </ul>
+              <p>Data is used for verifying entries, displaying work, and calculating spotlight rankings.</p>
             </section>
-
             <section>
               <h2 className="text-xl font-bold text-white mb-4 uppercase tracking-widest flex items-center gap-3">
-                <Trash2 className="text-vibe-accent" size={20} /> 4. Your Rights
+                <Trash2 className="text-vibe-accent" size={20} /> 4. Deletion
               </h2>
-              <p>
-                As a Vibe Coder, you have full control over your footprint. You can <strong>delete your projects at any time</strong>, which will permanently remove the record and any associated images from our cloud storage (Supabase).
-              </p>
+              <p>You have the right to remove your contributions. Each "Vibe" includes a "Delete Exhibit" option for owners.</p>
             </section>
-
             <section className="pt-12 border-t border-white/5">
               <p className="text-xs italic">
-                Last updated: March 2026. For privacy concerns, reach out to <a href="mailto:wjdwlen@naver.com" className="text-vibe-accent underline">wjdwlen@naver.com</a>.
+                Last updated: March 2026. Reach out to <a href="mailto:led@kakao.com" className="text-vibe-accent underline">led@kakao.com</a>.
               </p>
             </section>
           </div>
@@ -798,53 +757,36 @@ export default function App() {
       <div className="bg-mesh" />
       
       {/* Navigation */}
-      <nav className="flex justify-between items-center mb-16">
-        <div className="flex items-center gap-4">
-          <div className="w-8 h-12 border-[4px] border-vibe-accent flex items-center justify-center font-black text-lg text-white shadow-[0_0_15px_rgba(139,92,246,0.2)] bg-transparent">
-            V
+      <nav className="flex justify-between items-center mb-16 px-1 lg:px-0">
+        {/* Logo Section */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="w-[32px] h-[44px] shrink-0 border-[4px] border-vibe-accent flex items-end justify-center pb-1.5 bg-transparent">
+            <span className="text-white font-black text-xl leading-none">V</span>
           </div>
-          <span className="text-2xl font-bold tracking-tight">Vibe Gallery</span>
+          <h1 className="text-xl md:text-2xl font-black tracking-tighter hidden sm:block">
+            VIBE <span className="text-vibe-accent">GALLERY</span>
+          </h1>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           {user ? (
-            <motion.div 
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-full pl-4 pr-1 py-1 hover:border-vibe-accent/30 hover:bg-white/[0.07] transition-all group shadow-xl"
-            >
-              <div 
-                className="flex items-center gap-3 cursor-pointer"
-                onClick={handleOpenMyProject}
-              >
-                <div className="flex flex-col items-end">
-                  <span className="text-[10px] uppercase font-black tracking-widest text-vibe-accent opacity-70">Verified Vibe Coder</span>
-                  <span className="text-xs font-bold text-gray-400 group-hover:text-vibe-accent transition-colors">
-                    {user.email?.split('@')[0]}
-                  </span>
-                </div>
-                <img 
-                  src={user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${user.email}`} 
-                  className="w-10 h-10 rounded-full border-2 border-vibe-accent/20 group-hover:border-vibe-accent hover:scale-105 transition-all shadow-inner" 
-                  alt="Profile"
-                />
+            <div className="flex items-center gap-2 px-1.5 py-1 sm:px-6 sm:py-3 bg-white/5 border border-white/10 rounded-full backdrop-blur-md">
+              <div className="hidden sm:block text-right">
+                <p className="text-[10px] font-black italic text-vibe-accent uppercase tracking-[0.2em] leading-tight">Verified Vibe Coder</p>
+                <p className="text-xs font-bold text-gray-400">{user.user_metadata.full_name || user.email?.split('@')[0]}</p>
               </div>
-              <button 
-                onClick={handleLogout} 
-                className="p-3 text-gray-500 hover:text-red-400 transition-colors active:scale-90"
-              >
-                <LogIn size={18} className="rotate-180" />
-              </button>
-            </motion.div>
+              <img 
+                src={user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} 
+                className="w-6 h-6 sm:w-10 sm:h-10 rounded-full border-2 border-vibe-accent/30 shadow-[0_0_15px_rgba(139,92,246,0.3)] object-cover cursor-pointer hover:scale-110 active:scale-95 transition-all" 
+                onClick={handleOpenMyProject}
+                title="My Project"
+                alt="P" 
+              />
+              <button onClick={handleLogout} className="p-1 sm:p-2 text-gray-500 hover:text-white transition-colors" title="Logout"><LogOut size={14} /></button>
+            </div>
           ) : (
-            <motion.button 
-              whileHover={{ scale: 1.05, backgroundColor: "rgba(255,255,255,0.08)" }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleLogin} 
-              className="px-6 py-2.5 rounded-full border border-white/10 text-gray-400 hover:text-white transition-all text-[11px] font-bold uppercase tracking-widest flex items-center gap-2"
-            >
-              <LogIn size={15} />
-              Verify Vibe
-            </motion.button>
+            <button onClick={handleLogin} className="flex items-center gap-2 px-4 py-2 sm:px-8 sm:py-4 bg-vibe-accent text-white rounded-full font-bold uppercase tracking-widest text-[10px] sm:text-xs">
+              <LogIn size={16} /> <span className="hidden sm:inline">Join Galaxy</span>
+            </button>
           )}
         </div>
       </nav>
@@ -1523,8 +1465,7 @@ export default function App() {
           >
             Privacy Policy
           </button>
-          <a href="#" className="hover:text-vibe-accent transition-colors">Terms of Use</a>
-          <a href="mailto:wjdwlen@naver.com" className="hover:text-vibe-accent transition-colors">Contact</a>
+          <a href="mailto:led@kakao.com" className="hover:text-vibe-accent transition-colors">Contact</a>
         </div>
       </footer>
     </div>
