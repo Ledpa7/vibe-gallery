@@ -8,7 +8,7 @@ import {
 
 import { supabase } from '../lib/supabase';
 import { type User } from '@supabase/supabase-js';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { toast, Toaster } from 'react-hot-toast';
@@ -94,6 +94,7 @@ const VibeCard = memo(({ vibe, onClick }: {
 
 export default function MainPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -285,13 +286,24 @@ export default function MainPage() {
       if (currentUser) {
         checkAdmin(currentUser.id);
         fetchUserVotes(currentUser.id);
+        
+        // If logged in at root /, move to /main after session capture
+        if (location.pathname === '/' || location.pathname === '') {
+           navigate('/main', { replace: true });
+        }
       } else {
         setIsAdmin(false);
         setUserVotes({});
+        // Direct root path to /main for non-logged-in users as well
+        if (location.pathname === '/' || location.pathname === '') {
+          navigate('/main', { replace: true });
+        }
       }
     });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [location.pathname, navigate]);
+
+
 
 
   // [Scroll Lock] Prevent background scroll when any modal is open
