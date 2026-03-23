@@ -263,7 +263,7 @@ export default function MainPage() {
     [selectedId, historyOffset, vibes, getProjectByDateOffset]
   ) as Vibe | null;
 
-  const todayVibe = useMemo(() => getProjectByDateOffset(0), [getProjectByDateOffset]);
+  const todayVibe = useMemo(() => getProjectByDateOffset(0), [getProjectByDateOffset, dailyTopVibes]);
 
   useEffect(() => {
     // 1. Initial Data Fetch (Only once on mount)
@@ -845,7 +845,12 @@ export default function MainPage() {
             <div className="flex items-center gap-3 px-3 py-2 sm:px-6 sm:py-3 bg-white/5 border border-white/10 rounded-full backdrop-blur-md">
               <div className="hidden sm:block text-right">
                 <p className="text-[10px] font-black italic text-vibe-accent uppercase tracking-[0.2em] leading-tight">Vibe Coder</p>
-                <p className="text-xs font-bold text-gray-400">{user.user_metadata.full_name || user.email?.split('@')[0]}</p>
+                <div className="flex flex-col">
+                  {user.user_metadata.full_name && (
+                    <p className="text-xs font-bold text-gray-300 leading-tight">{user.user_metadata.full_name}</p>
+                  )}
+                  <p className="text-[9px] font-medium text-gray-500 leading-tight">{user.email}</p>
+                </div>
               </div>
               <img 
                 src={user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} 
