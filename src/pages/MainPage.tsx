@@ -266,48 +266,57 @@ export default function MainPage() {
   const todayVibe = useMemo(() => getProjectByDateOffset(0), [getProjectByDateOffset]);
 
   useEffect(() => {
-    fetchVibes(); // Default args fetchVibes(0, true)
-    
-    const refreshUserData = async (userId: string) => {
-      // Step 1: Batch related user requests in parallel (One-time flight)
-      const [adminResult, votesResult] = await Promise.all([
-        supabase.from('profiles').select('role').eq('id', userId).single(),
-        supabase.from('vibe_votes').select('vibe_id, vote_type').eq('user_id', userId)
-      ]);
+    // 1. Initial Data Fetch (Only once on mount)
+    fetchVibes(); 
 
-      // Step 2: Handle results locally
-      setIsAdmin(adminResult.data?.role === 'admin');
-      
-      if (votesResult.data) {
-        const votesMap = votesResult.data.reduce((acc, curr) => {
-          acc[curr.vibe_id] = curr.vote_type;
-          return acc;
-        }, {} as Record<string, 'up' | 'down'>);
-        setUserVotes(votesMap);
+    // 2. Optimized User Data Refresher
+    const refreshUserData = async (userId: string) => {
+      try {
+        const [adminResult, votesResult] = await Promise.all([
+          supabase.from('profiles').select('role').eq('id', userId).single(),
+          supabase.from('vibe_votes').select('vibe_id, vote_type').eq('user_id', userId)
+        ]);
+
+        // Non-admins or new users won't have a profile record yet - this is fine
+        setIsAdmin(adminResult.data?.role === 'admin');
+        
+        if (votesResult.data) {
+          const votesMap = votesResult.data.reduce((acc, curr) => {
+            acc[curr.vibe_id] = curr.vote_type;
+            return acc;
+          }, {} as Record<string, 'up' | 'down'>);
+          setUserVotes(votesMap);
+        }
+      } catch (err) {
+        console.error("Profile fetch skipped for new user");
+        setIsAdmin(false);
       }
     };
 
-    const fetchInitialSession = async () => {
+    // 3. One-time Initial Session Check
+    const checkInitialAuth = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
         setUser(currentUser);
         refreshUserData(currentUser.id);
       }
     };
-    fetchInitialSession();
+    checkInitialAuth();
 
-    let isAuthHandling = false;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (isAuthHandling) return; 
-      isAuthHandling = true;
-
+    // 4. Stable Auth Change Listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       const currentUser = session?.user ?? null;
+      
+      // Update basic user state immediately for UI to reflect login (Important for new users!)
       setUser(currentUser);
       
       if (currentUser) {
-        // Only fetch if session just changed or first time
-        refreshUserData(currentUser.id);
+        // Fetch detailed preferences/roles in background
+        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+          refreshUserData(currentUser.id);
+        }
         
+        // Handle path consistency
         if (location.pathname === '/' || location.pathname === '') {
            navigate('/main', { replace: true });
         }
@@ -318,10 +327,10 @@ export default function MainPage() {
           navigate('/main', { replace: true });
         }
       }
-      isAuthHandling = false;
     });
+
     return () => subscription.unsubscribe();
-  }, [location.pathname, navigate]);
+  }, []); // Remove location from dependency to prevent listener leaks
 
 
 
