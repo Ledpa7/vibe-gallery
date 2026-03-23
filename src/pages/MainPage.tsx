@@ -269,6 +269,16 @@ export default function MainPage() {
       setIsAdmin(data?.role === 'admin');
     };
 
+    const fetchInitialSession = async () => {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      setUser(currentUser);
+      if (currentUser) {
+        checkAdmin(currentUser.id);
+        fetchUserVotes(currentUser.id);
+      }
+    };
+    fetchInitialSession();
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
@@ -282,6 +292,7 @@ export default function MainPage() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
 
   // [Scroll Lock] Prevent background scroll when any modal is open
   useEffect(() => {
@@ -1153,10 +1164,15 @@ export default function MainPage() {
                           </div>
                         </form>
                       ) : (
-                        <div className="bg-white/5 border border-white/10 rounded-xl p-8 text-center mb-12">
-                           <p className="text-gray-400 text-sm mb-4">You must be a verified Vibe Coder to leave feedback.</p>
-                           <button onClick={handleLogin} className="text-vibe-accent text-xs font-bold uppercase tracking-widest hover:underline">Verify with Google</button>
-                        </div>
+                          <div className="bg-black/40 border border-white/5 rounded-2xl p-10 text-center mb-12 shadow-2xl">
+                             <p className="text-gray-400 text-sm mb-6 font-medium italic">Join the vibration to leave your feedback.</p>
+                             <button 
+                               onClick={handleLogin} 
+                               className="px-8 py-3 bg-black border border-white/10 text-white rounded-full font-bold uppercase tracking-[0.2em] text-xs hover:border-vibe-accent/50 transition-all shadow-xl"
+                             >
+                               LOGIN WITH GOOGLE
+                             </button>
+                          </div>
                       )}
 
                       {/* Comments List */}
@@ -1244,11 +1260,11 @@ export default function MainPage() {
                    <p className="text-gray-400 text-sm mb-10 leading-relaxed max-w-[280px] mx-auto">To preserve the gallery's premium standards, we only accept submissions from verified Vibe Coders.</p>
                    <button 
                      onClick={handleLogin}
-                     className="vibe-button w-full justify-center py-6 bg-white/[0.03] border-white/10 hover:bg-white/[0.08] hover:border-vibe-accent/50 text-white transition-all duration-500 shadow-2xl group flex flex-col gap-1 items-center"
+                     className="w-full justify-center py-6 bg-black border border-white/10 hover:border-vibe-accent/50 text-white rounded-2xl transition-all duration-500 shadow-2xl group flex flex-col gap-1 items-center"
                    >
                      <div className="flex items-center gap-3">
                         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 bg-white rounded-full p-0.5" alt="G" />
-                        <span className="font-black tracking-[0.2em] text-sm group-hover:text-vibe-accent transition-colors">LOGIN WITH GOOGLE</span>
+                        <span className="font-black tracking-[0.2em] text-sm group-hover:text-vibe-accent transition-colors text-white">LOGIN WITH GOOGLE</span>
                      </div>
                      <span className="text-[9px] text-gray-500 uppercase tracking-widest">Connect to Vibe Gallery Network</span>
                    </button>
