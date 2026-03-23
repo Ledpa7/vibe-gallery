@@ -747,9 +747,10 @@ export default function MainPage() {
             </div>
 
           ) : (
-            <button onClick={handleLogin} className="flex items-center gap-2 px-6 py-3 sm:px-8 sm:py-4 bg-vibe-accent text-white rounded-full font-bold uppercase tracking-widest text-[11px] sm:text-xs shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:scale-105 active:scale-95 transition-all">
-              <LogIn size={18} /> <span className="hidden sm:inline">Join Galaxy</span>
+            <button onClick={handleLogin} className="flex items-center gap-2 px-6 py-3 sm:px-8 sm:py-4 bg-black border border-white/10 text-white rounded-full font-bold uppercase tracking-[0.2em] text-[11px] sm:text-xs shadow-2xl hover:bg-white/5 hover:border-vibe-accent/50 transition-all active:scale-95 group">
+              <LogIn size={18} className="group-hover:text-vibe-accent transition-colors" /> <span className="hidden sm:inline">LOGIN</span>
             </button>
+
 
           )}
         </div>
