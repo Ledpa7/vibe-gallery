@@ -1346,7 +1346,6 @@ export default function MainPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-2xl"
-            onClick={closeUploadModal}
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
