@@ -22,6 +22,9 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Storage Settings: Support multiple buckets for 50MB-per-bucket free tier bypass
+const BUCKET_CANDIDATES = ['vibe-images', 'vibe-images2'];
+
 // Vibe Interface (Database Schema)
 interface Vibe {
   id: string;
@@ -115,6 +118,7 @@ export default function MainPage() {
   const [historyOffset, setHistoryOffset] = useState(0);
   const [isVoting, setIsVoting] = useState<string | null>(null);
   const [isDeletingVibe, setIsDeletingVibe] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Pagination State
   const [page, setPage] = useState(0);
@@ -264,44 +268,57 @@ export default function MainPage() {
   useEffect(() => {
     fetchVibes(); // Default args fetchVibes(0, true)
     
-    const checkAdmin = async (userId: string) => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-      setIsAdmin(data?.role === 'admin');
+    const refreshUserData = async (userId: string) => {
+      // Step 1: Batch related user requests in parallel (One-time flight)
+      const [adminResult, votesResult] = await Promise.all([
+        supabase.from('profiles').select('role').eq('id', userId).single(),
+        supabase.from('vibe_votes').select('vibe_id, vote_type').eq('user_id', userId)
+      ]);
+
+      // Step 2: Handle results locally
+      setIsAdmin(adminResult.data?.role === 'admin');
+      
+      if (votesResult.data) {
+        const votesMap = votesResult.data.reduce((acc, curr) => {
+          acc[curr.vibe_id] = curr.vote_type;
+          return acc;
+        }, {} as Record<string, 'up' | 'down'>);
+        setUserVotes(votesMap);
+      }
     };
 
     const fetchInitialSession = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      setUser(currentUser);
       if (currentUser) {
-        checkAdmin(currentUser.id);
-        fetchUserVotes(currentUser.id);
+        setUser(currentUser);
+        refreshUserData(currentUser.id);
       }
     };
     fetchInitialSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    let isAuthHandling = false;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (isAuthHandling) return; 
+      isAuthHandling = true;
+
       const currentUser = session?.user ?? null;
       setUser(currentUser);
+      
       if (currentUser) {
-        checkAdmin(currentUser.id);
-        fetchUserVotes(currentUser.id);
+        // Only fetch if session just changed or first time
+        refreshUserData(currentUser.id);
         
-        // If logged in at root /, move to /main after session capture
         if (location.pathname === '/' || location.pathname === '') {
            navigate('/main', { replace: true });
         }
       } else {
         setIsAdmin(false);
         setUserVotes({});
-        // Direct root path to /main for non-logged-in users as well
         if (location.pathname === '/' || location.pathname === '') {
           navigate('/main', { replace: true });
         }
       }
+      isAuthHandling = false;
     });
     return () => subscription.unsubscribe();
   }, [location.pathname, navigate]);
@@ -325,14 +342,15 @@ export default function MainPage() {
     if (isInitial) setIsLoading(true);
     else setIsFetchingMore(true);
     
-    // 1. Fetch the pre-calculated daily winners on initial mount
+    // 1. Fetch static or one-time data on initial mount ONLY
     if (isInitial) {
-      const { data: topVibesData } = await supabase
-        .from('daily_top_vibes')
-        .select('*')
-        .order('vibe_date', { ascending: false });
+      const [topVibesResult, totalCountResult] = await Promise.all([
+        supabase.from('daily_top_vibes').select('*').order('vibe_date', { ascending: false }),
+        supabase.from('vibes').select('id', { count: 'exact', head: true })
+      ]);
         
-      if (topVibesData) setDailyTopVibes(topVibesData);
+      if (topVibesResult.data) setDailyTopVibes(topVibesResult.data);
+      if (totalCountResult.count !== null) setTotalCount(totalCountResult.count);
     }
 
     // 2. Fetch general gallery vibes via Global RPC
@@ -377,6 +395,7 @@ export default function MainPage() {
   };
 
   const fetchUserVotes = async (userId: string) => {
+    // Replaced by refreshUserData batch call for efficiency
     const { data } = await supabase
       .from('vibe_votes')
       .select('vibe_id, vote_type')
@@ -390,6 +409,7 @@ export default function MainPage() {
       setUserVotes(votesMap);
     }
   };
+
 
   useEffect(() => {
     if (selectedId && displayVibe && displayVibe.id !== 'placeholder') {
@@ -651,28 +671,41 @@ export default function MainPage() {
       const options = { maxSizeMB: 0.03, maxWidthOrHeight: 480, useWebWorker: true };
       const microFile = await imageCompression(finalFile, options);
 
-      // 4. Upload to Storage
+      // 4. Try upload with Multi-Bucket Failover
       const fileName = `${Date.now()}.webp`;
       const filePath = `${currentUser.id}/${fileName}`;
+      let finalPublicUrl = '';
+      let usedBucket = '';
+      let uploadSuccess = false;
 
-      const { error: uploadError } = await supabase.storage
-        .from('vibe-images')
-        .upload(filePath, microFile);
+      for (const bucketName of BUCKET_CANDIDATES) {
+          const { error: uploadError } = await supabase.storage
+            .from(bucketName)
+            .upload(filePath, microFile);
 
-      if (uploadError) throw uploadError;
+          if (!uploadError) {
+              const { data: { publicUrl } } = supabase.storage
+                .from(bucketName)
+                .getPublicUrl(filePath);
+              finalPublicUrl = publicUrl;
+              usedBucket = bucketName;
+              uploadSuccess = true;
+              break; // Success! Exit loop
+          } else {
+              console.warn(`Bucket [${bucketName}] failed:`, uploadError.message);
+              // If it's not a quota/network error, we might still fail, but we'll try the next bucket as a fallback
+          }
+      }
 
-      // 5. Get Public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('vibe-images')
-        .getPublicUrl(filePath);
+      if (!uploadSuccess) throw new Error("All storage buckets are full. Please contact the administrator.");
 
-      // 6. Insert Vibe Record
+      // 5. Insert Vibe Record with the successful publicUrl
       const { error: dbError } = await supabase
         .from('vibes')
         .insert({ 
           title: title,
           summary: summary,
-          image: publicUrl,
+          image: finalPublicUrl,
           link: link,
           tech: techInput ? techInput.split(',').map(t => t.trim()).filter(Boolean) : ['N/A'],
           user_id: currentUser.id,
@@ -682,8 +715,8 @@ export default function MainPage() {
         });
 
       if (dbError) {
-        // Cleanup orphaned image if DB insert fails
-        await supabase.storage.from('vibe-images').remove([filePath]);
+        // Cleanup orphaned image from the specific bucket used
+        await supabase.storage.from(usedBucket).remove([filePath]);
         throw dbError;
       }
 
@@ -712,14 +745,21 @@ export default function MainPage() {
 
     setIsDeletingVibe(vibeId);
     try {
-      // 2. Extract path for storage cleanup
+      // 2. Intelligent Bucket and Path Detection from URL
       let filePath = '';
+      let targetBucket = BUCKET_CANDIDATES[0]; // Fallback to primary
+
       try {
-        const urlParts = imageUrl.split('/vibe-images/');
-        if (urlParts.length > 1) {
-          filePath = urlParts[1];
+        // Standard Supabase URL Format: .../storage/v1/object/public/BUCKET_NAME/USER_ID/FILE_NAME
+        const publicUrlIdentifier = '/storage/v1/object/public/';
+        if (imageUrl.includes(publicUrlIdentifier)) {
+            const pathParts = imageUrl.split(publicUrlIdentifier)[1].split('/');
+            targetBucket = pathParts[0]; // Extracted bucket name (vibe-images, vibe-images2 etc)
+            filePath = pathParts.slice(1).join('/'); // Extracted user_id/file.webp
         }
-      } catch(e) {}
+      } catch(e) {
+          console.error("URL parsing fail:", e);
+      }
 
       // 3. Delete from DB (FK dependencies must be handled by CASCADE in PG)
       const { error: dbError } = await supabase
@@ -731,10 +771,10 @@ export default function MainPage() {
         throw new Error(`Database error: ${dbError.message} (${dbError.code})`);
       }
 
-      // 4. Cleanup image file from storage
+      // 4. Cleanup image file from the correctly identified bucket
       if (filePath) {
-        const { error: storageError } = await supabase.storage.from('vibe-images').remove([filePath]);
-        if (storageError) console.error("Storage cleanup failed but DB record was removed", storageError);
+        const { error: storageError } = await supabase.storage.from(targetBucket).remove([filePath]);
+        if (storageError) console.error(`Storage cleanup failed in [${targetBucket}]`, storageError);
       }
 
       // 5. Success: Clean up UI state
@@ -897,7 +937,19 @@ export default function MainPage() {
         </motion.div>
       </div>
 
-            {/* Gallery Grid */}
+            {/* Gallery Grid Section Header */}
+      {!isLoading && (
+        <div className="mb-6 flex items-center justify-between px-1">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-vibe-accent animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500">
+              Total Vibes ({totalCount})
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Gallery Grid */}
       <motion.div 
         variants={{
           hidden: { opacity: 0 },
