@@ -101,6 +101,9 @@ export default function MainPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [userVotes, setUserVotes] = useState<Record<string, 'up' | 'down'>>({});
   
+  // Security State
+  const lastCommentTimeRef = useRef<number>(0);
+  
   // Real DB State
   const [vibes, setVibes] = useState<Vibe[]>([]);
   const [dailyTopVibes, setDailyTopVibes] = useState<Vibe[]>([]);
@@ -131,7 +134,7 @@ export default function MainPage() {
   const [finalCroppedBlob, setFinalCroppedBlob] = useState<Blob | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
 
-  // Helper to generate the final processed 480x480 blob
+  // Helper to generate the final processed 480x480 WebP blob
   const generateCroppedBlob = (): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const activeCrop = completedCrop || crop;
@@ -157,7 +160,7 @@ export default function MainPage() {
       canvas.toBlob((blob) => {
         if (blob) resolve(blob);
         else reject('Canvas failed');
-      }, 'image/jpeg', 0.9);
+      }, 'image/webp', 0.82); // Balanced WebP
     });
   };
 
@@ -401,6 +404,14 @@ export default function MainPage() {
     e.preventDefault();
     if (!user || !newComment.trim() || !displayVibe || displayVibe.id === 'placeholder') return;
 
+    // Security: Anti-Spam / Rate Limiting (10 seconds between comments)
+    const now = Date.now();
+    if (now - lastCommentTimeRef.current < 10000 && !isAdmin) {
+      toast.error('Please wait 10 seconds before sending another feedback to prevent spam.');
+      return;
+    }
+    lastCommentTimeRef.current = now;
+
     setIsSubmittingComment(true);
     const { error } = await supabase
       .from('comments')
@@ -510,7 +521,7 @@ export default function MainPage() {
     });
   };
 
-  const handleUploadAttempt = () => {
+  const handleUploadAttempt = async () => {
     if (!user) {
       handleLogin();
       return;
@@ -529,9 +540,19 @@ export default function MainPage() {
       return;
     }
 
-    // 2. Feedback/Evaluation check (use local userVotes cache — no DB call needed)
+    // 2. Feedback/Evaluation check
+    // A. Check local votes first (fastest)
     const hasVoted = Object.keys(userVotes).length > 0;
-    if (!hasVoted) {
+    
+    // B. Check for comments in the database
+    const { count: commentCount } = await supabase
+      .from('comments')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id);
+
+    const hasEvaluation = hasVoted || (commentCount !== null && commentCount > 0);
+
+    if (!hasEvaluation) {
       toast.error('You must evaluate other projects (applaud, dislike, or leave feedback) before uploading your own Vibe!');
       return;
     }
@@ -539,6 +560,7 @@ export default function MainPage() {
     // Passed all checks
     setShowUploadModal(true);
   };
+
 
   const closeUploadModal = useCallback(() => {
     setShowUploadModal(false);
@@ -593,8 +615,25 @@ export default function MainPage() {
     setIsUploading(true);
     const title = formData.get('title') as string;
     const summary = formData.get('summary') as string;
-    const link = formData.get('link') as string;
+    let link = formData.get('link') as string;
     const techInput = formData.get('tech') as string;
+
+    // Security: Deep check to prevent XSS (javascript: or data: URIs)
+    if (link && !link.startsWith('http://') && !link.startsWith('https://')) {
+      link = 'https://' + link;
+    }
+    try {
+      const parsedUrl = new URL(link);
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        toast.error("Security Alert: Vibe Link must be a valid HTTP/HTTPS URL.");
+        setIsUploading(false);
+        return;
+      }
+    } catch {
+      toast.error("Vibe Link is not a valid URL format.");
+      setIsUploading(false);
+      return;
+    }
 
     try {
       // 2. Use the already confirmed blob or generate one now
@@ -606,14 +645,14 @@ export default function MainPage() {
         }
         finalBlob = await generateCroppedBlob();
       }
-      const finalFile = new File([finalBlob], 'vibe.jpg', { type: 'image/jpeg' });
+      const finalFile = new File([finalBlob], 'vibe.webp', { type: 'image/webp' });
 
-      // 3. Final Compression (Ensure it hits 0.04MB limit)
-      const options = { maxSizeMB: 0.04, maxWidthOrHeight: 480, useWebWorker: true };
+      // 3. Final Compression (Extreme Efficiency at 480px)
+      const options = { maxSizeMB: 0.03, maxWidthOrHeight: 480, useWebWorker: true };
       const microFile = await imageCompression(finalFile, options);
 
       // 4. Upload to Storage
-      const fileName = `${Date.now()}.jpg`;
+      const fileName = `${Date.now()}.webp`;
       const filePath = `${currentUser.id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
@@ -1353,7 +1392,7 @@ export default function MainPage() {
                             <ImageIcon size={32} />
                             <div className="flex flex-col items-center">
                               <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Select Screenshot</span>
-                              <span className="text-[9px] text-gray-600 mt-1 uppercase tracking-tighter">480px optimized</span>
+                              <span className="text-[9px] text-gray-600 mt-1 uppercase tracking-tighter">480px Efficiency WebP</span>
                             </div>
                           </div>
                         </div>
