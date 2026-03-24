@@ -17,10 +17,11 @@
 - **[초압축 다이어트]**: 480px 해상도 고정 및 파일당 **30KB 미만** 압축 적용 (50MB 스토리지 쿼터 최적화).
 - **[멀티 버킷 대응]**: `vibe-images` 버킷 포화 시 자동으로 `vibe-images2`로 넘어가는 **Failover** 시스템 구축.
 
-### **3. 📈 성능 최적화 (Performance)**
-- **[DB 호출 효율화]**: 3번의 개별 쿼리를 1번의 병렬 요청(`Promise.all`)으로 묶어 DB 부하 50% 이상 감소.
-- **[인증 리스너 안정화]**: 페이지 이동 시 발생하는 중복 세션 조회를 차단하여 사이트 속도 향상.
-- **[인덱싱]**: 조회 빈도가 높은 주요 컬럼(user_id, vibe_id)에 DB 인덱스 추가.
+### **3. 📈 성능 최적화### 🚀 Performance Optimizations (Phase 1)
+- [x] **Global In-Memory Caching**: Implemented a 5-minute TTL cache for gallery data to bypass redundant Supabase hits.
+- [x] **Memoized Event Handlers**: Replaced inline arrow functions with `useCallback` to prevent `VibeCard` (React.memo) re-renders.
+- [x] **Selective Database Fetching**: Refined queries to only fetch columns necessary for the grid UI, reducing JSON payload.
+- [ ] **Skeleton UI**: Under consideration for improving perceived loading states.
 
 ### **4. ✨ UI/UX 개선**
 - **[카운트 표시]**: 갤러리 그리드 상단에 **`Total Vibes (X)`** 레이블 및 실시간 상태등 추가.

@@ -53,6 +53,13 @@ interface Comment {
   content: string;
 }
 
+// Global Cache Stores
+let globalVibeCache: Vibe[] | null = null;
+let globalTopVibeCache: Vibe[] | null = null;
+let globalTotalCount: number | null = null;
+let lastCacheTime = 0;
+const CACHE_TTL = 1000 * 60 * 5; 
+
 const VibeCard = memo(({ vibe, onClick }: { 
   vibe: Vibe, 
   onClick: () => void
@@ -115,6 +122,17 @@ export default function MainPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isTodayProjectModal, setIsTodayProjectModal] = useState(false);
   const [historyOffset, setHistoryOffset] = useState(0);
+
+  // Memoized Handlers for React.memo
+  const handleCardClick = useCallback((id: string, isToday: boolean = false) => {
+    setIsTodayProjectModal(isToday);
+    setSelectedId(id);
+    if (isToday) setHistoryOffset(0);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedId(null);
+  }, []);
   const [isVoting, setIsVoting] = useState<string | null>(null);
   const [isDeletingVibe, setIsDeletingVibe] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
@@ -265,8 +283,15 @@ export default function MainPage() {
   const todayVibe = useMemo(() => getProjectByDateOffset(0), [getProjectByDateOffset, dailyTopVibes]);
 
   useEffect(() => {
-    // 1. Initial Data Fetch (Only once on mount)
-    fetchVibes(); 
+    // Check for fresh cache before fetching
+    if (globalVibeCache && (Date.now() - lastCacheTime < CACHE_TTL)) {
+        setVibes(globalVibeCache);
+        setDailyTopVibes(globalTopVibeCache || []);
+        setTotalCount(globalTotalCount || 0);
+        setIsLoading(false);
+    } else {
+        fetchVibes(); 
+    }
 
     // 2. Optimized User Data Refresher
     const refreshUserData = async (userId: string) => {
@@ -350,18 +375,29 @@ export default function MainPage() {
       if (isInitial) {
         // 🚀 CRITICAL OPTIMIZATION: Combine ALL global initial requests into one Promise.all
         const [topVibesResult, totalCountResult, vibesResult] = await Promise.all([
-          supabase.from('daily_top_vibes').select('*').order('vibe_date', { ascending: false }),
+          supabase.from('daily_top_vibes').select('id, title, summary, image, tech, likes, vibe_date').order('vibe_date', { ascending: false }),
           supabase.from('vibes').select('id', { count: 'exact', head: true }),
-          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).range(start, end)
+          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, image, tech, likes, created_at').range(start, end)
         ]);
           
-        if (topVibesResult.data) setDailyTopVibes(topVibesResult.data);
-        if (totalCountResult.count !== null) setTotalCount(totalCountResult.count);
+        if (topVibesResult.data) {
+          const data = topVibesResult.data as Vibe[];
+          setDailyTopVibes(data);
+          globalTopVibeCache = data;
+        }
+        if (totalCountResult.count !== null) {
+          setTotalCount(totalCountResult.count);
+          globalTotalCount = totalCountResult.count;
+        }
         
-        if (vibesResult.data) {
-          setVibes(vibesResult.data);
+        const vibesData = vibesResult.data as Vibe[] | null;
+        if (vibesData) {
+          setVibes(vibesData);
           setPage(0);
-          setHasMore(vibesResult.data.length === PAGE_SIZE);
+          setHasMore(vibesData.length === PAGE_SIZE);
+          // Persistence to cache
+          globalVibeCache = vibesData;
+          lastCacheTime = Date.now();
         }
       } else {
         // Background pagination fetch
@@ -420,7 +456,7 @@ export default function MainPage() {
       setComments([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  }, [selectedId, displayVibe?.id]);
 
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -900,11 +936,7 @@ export default function MainPage() {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           whileHover={{ scale: 1.05 }}
-          onClick={() => {
-            setHistoryOffset(0);
-            setIsTodayProjectModal(true);
-            setSelectedId('today-project'); 
-          }}
+          onClick={() => handleCardClick('today-project', true)}
           className="lg:w-[340px] w-full cursor-pointer relative group"
         >
           <div className="featured-border-glow" />
@@ -1016,10 +1048,7 @@ export default function MainPage() {
               <VibeCard 
                 key={vibe.id} 
                 vibe={vibe} 
-                onClick={() => {
-                  setIsTodayProjectModal(false);
-                  setSelectedId(vibe.id);
-                }} 
+                onClick={() => handleCardClick(vibe.id, false)}
               />
             ))}
             {!isLoading && vibes.length === 0 && (
@@ -1056,16 +1085,16 @@ export default function MainPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl"
-            onClick={() => setSelectedId(null)}
+            onClick={handleCloseModal}
           >
-            <div className="flex items-center justify-center gap-8 w-full" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-center gap-8 w-full">
               {/* Yesterday Ghost Preview */}
               {isTodayProjectModal && getProjectByDateOffset(historyOffset + 1) && (
                 <motion.div 
                   initial={{ opacity: 0, x: 50, scale: 0.8 }}
                   animate={{ opacity: 1, x: 0, scale: 0.9 }}
                   className="hidden xl:flex glass-card w-48 h-[60vh] shrink-0 overflow-hidden relative cursor-pointer group/ghost border-vibe-accent/20"
-                  onClick={() => setHistoryOffset(prev => prev + 1)}
+                  onClick={(e) => { e.stopPropagation(); setHistoryOffset(prev => prev + 1); }}
                 >
                   <img src={getProjectByDateOffset(historyOffset + 1)!.image} className="absolute inset-0 w-full h-full object-cover blur-md opacity-20 group-hover/ghost:opacity-40 transition-opacity" />
                   <div className="absolute inset-0 bg-gradient-to-l from-[#0f0f11] via-transparent to-transparent z-10" />
@@ -1081,6 +1110,7 @@ export default function MainPage() {
               <motion.div 
                 layoutId={selectedId!}
                 className="glass-card max-w-4xl w-full max-h-[90vh] overflow-y-auto bg-[#0f0f11] pointer-events-auto relative shadow-[0_0_100px_rgba(0,0,0,0.8)] outline outline-1 outline-white/5"
+                onClick={e => e.stopPropagation()}
               >
                 {/* Back to Today Button */}
                 {isTodayProjectModal && historyOffset > 0 && (
@@ -1134,7 +1164,7 @@ export default function MainPage() {
                   </AnimatePresence>
                   
                   <button 
-                    onClick={() => setSelectedId(null)}
+                    onClick={handleCloseModal}
                     className="absolute top-4 right-4 z-50 p-2 bg-black/40 hover:bg-black/60 rounded-full text-white transition-colors backdrop-blur-md"
                   >
                     <Plus size={24} className="rotate-45" />
@@ -1261,8 +1291,16 @@ export default function MainPage() {
                               onChange={(e) => setNewComment(e.target.value)}
                               maxLength={300}
                               placeholder="Share your thoughts on this vibe... (Max 300)"
-                              className="w-full bg-white/5 border border-white/10 rounded-xl p-6 outline-none focus:border-vibe-accent transition-all min-h-[120px] resize-none text-white text-sm"
+                              className="w-full bg-white/5 border border-white/10 rounded-xl p-6 pb-16 outline-none focus:border-vibe-accent transition-all min-h-[140px] resize-none text-white text-sm"
                             />
+                            <div className="absolute bottom-5 left-6 pointer-events-none">
+                              <span className={cn(
+                                "text-[11px] font-black tracking-widest uppercase transition-colors",
+                                newComment.length >= 250 ? "text-red-400" : "text-gray-500"
+                              )}>
+                                {newComment.length} / 300
+                              </span>
+                            </div>
                             <button 
                               disabled={isSubmittingComment || !newComment.trim()}
                               className="absolute bottom-4 right-4 vibe-button py-2 px-4 text-xs bg-vibe-accent text-white disabled:opacity-50"
@@ -1313,7 +1351,7 @@ export default function MainPage() {
                   initial={{ opacity: 0, x: -50, scale: 0.8 }}
                   animate={{ opacity: 1, x: 0, scale: 0.9 }}
                   className="hidden xl:flex glass-card w-48 h-[60vh] shrink-0 overflow-hidden relative cursor-pointer group/ghost border-vibe-accent/20"
-                  onClick={() => setHistoryOffset(prev => prev - 1)}
+                  onClick={(e) => { e.stopPropagation(); setHistoryOffset(prev => prev - 1); }}
                 >
                   <img src={getProjectByDateOffset(historyOffset - 1)!.image} className="absolute inset-0 w-full h-full object-cover blur-md opacity-20 group-hover/ghost:opacity-40 transition-opacity" />
                   <div className="absolute inset-0 bg-gradient-to-r from-[#0f0f11] via-transparent to-transparent z-10" />
