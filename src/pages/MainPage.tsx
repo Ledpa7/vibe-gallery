@@ -908,7 +908,6 @@ export default function MainPage() {
           <motion.h1 
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            whileHover={{ scale: 1.02 }}
             className={cn(
               "text-5xl lg:text-7xl font-bold mb-6",
               "bg-gradient-to-r from-white via-white to-gray-500 bg-clip-text text-transparent",
