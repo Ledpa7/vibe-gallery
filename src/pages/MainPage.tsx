@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  ThumbsUp, ThumbsDown, ArrowUpRight, Layers, Plus, HelpCircle, LogIn, 
+  ThumbsUp, ThumbsDown, ArrowUpRight, Layers, Plus, HelpCircle,
   ShieldCheck, X, Upload, History, ChevronLeft, ChevronRight, Calendar, 
   Image as ImageIcon, Loader2, Trash2, Check, LogOut
 } from 'lucide-react';
 
 import { supabase } from '../lib/supabase';
 import { type User } from '@supabase/supabase-js';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { toast, Toaster } from 'react-hot-toast';
@@ -97,7 +97,6 @@ const VibeCard = memo(({ vibe, onClick }: {
 
 export default function MainPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -277,7 +276,6 @@ export default function MainPage() {
           supabase.from('vibe_votes').select('vibe_id, vote_type').eq('user_id', userId)
         ]);
 
-        // Non-admins or new users won't have a profile record yet - this is fine
         setIsAdmin(adminResult.data?.role === 'admin');
         
         if (votesResult.data) {
@@ -288,49 +286,39 @@ export default function MainPage() {
           setUserVotes(votesMap);
         }
       } catch (err) {
-        console.error("Profile fetch skipped for new user");
+        console.warn("Profile fetch skipped for session initialization");
         setIsAdmin(false);
       }
     };
 
-    // 3. One-time Initial Session Check
-    const checkInitialAuth = async () => {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser) {
-        setUser(currentUser);
-        refreshUserData(currentUser.id);
-      }
-    };
-    checkInitialAuth();
-
-    // 4. Stable Auth Change Listener
+    // 3. Stable Auth Change Listener (Consolidated for efficiency)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       const currentUser = session?.user ?? null;
       
-      // Update basic user state immediately for UI to reflect login (Important for new users!)
+      // Update basic user state immediately for core UI
       setUser(currentUser);
       
       if (currentUser) {
-        // Fetch detailed preferences/roles in background
+        // Fetch detailed profile/votes logic in background on auth events
         if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
           refreshUserData(currentUser.id);
         }
         
-        // Handle path consistency
-        if (location.pathname === '/' || location.pathname === '') {
+        // Handle path consistency globally - use window.location to escape closure staleness
+        if (window.location.pathname === '/' || window.location.pathname === '') {
            navigate('/main', { replace: true });
         }
       } else {
         setIsAdmin(false);
         setUserVotes({});
-        if (location.pathname === '/' || location.pathname === '') {
+        if (window.location.pathname === '/' || window.location.pathname === '') {
           navigate('/main', { replace: true });
         }
       }
     });
 
     return () => subscription.unsubscribe();
-  }, []); // Remove location from dependency to prevent listener leaks
+  }, []); // Shared initialization logic
 
 
 
@@ -351,43 +339,48 @@ export default function MainPage() {
     if (isInitial) setIsLoading(true);
     else setIsFetchingMore(true);
     
-    // 1. Fetch static or one-time data on initial mount ONLY
-    if (isInitial) {
-      const [topVibesResult, totalCountResult] = await Promise.all([
-        supabase.from('daily_top_vibes').select('*').order('vibe_date', { ascending: false }),
-        supabase.from('vibes').select('id', { count: 'exact', head: true })
-      ]);
-        
-      if (topVibesResult.data) setDailyTopVibes(topVibesResult.data);
-      if (totalCountResult.count !== null) setTotalCount(totalCountResult.count);
-    }
-
-    // 2. Fetch general gallery vibes via Global RPC
+    // Preparation for parallel processing
     const start = currentPage * PAGE_SIZE;
     const end = start + PAGE_SIZE - 1;
-
     const today = new Date();
     // Seed changes every HOUR to shuffle globally across all pages
     const seed = today.getFullYear() * 1000000 + (today.getMonth() + 1) * 10000 + today.getDate() * 100 + today.getHours();
 
-    const { data: vibesData } = await supabase
-      .rpc('get_shuffled_vibes', { seed_val: seed })
-      .range(start, end);
-    
-    if (vibesData) {
+    try {
       if (isInitial) {
-        setVibes(vibesData);
-        setPage(0); // Explicitly reset page to 0 on initial/refresh
+        // 🚀 CRITICAL OPTIMIZATION: Combine ALL global initial requests into one Promise.all
+        const [topVibesResult, totalCountResult, vibesResult] = await Promise.all([
+          supabase.from('daily_top_vibes').select('*').order('vibe_date', { ascending: false }),
+          supabase.from('vibes').select('id', { count: 'exact', head: true }),
+          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).range(start, end)
+        ]);
+          
+        if (topVibesResult.data) setDailyTopVibes(topVibesResult.data);
+        if (totalCountResult.count !== null) setTotalCount(totalCountResult.count);
+        
+        if (vibesResult.data) {
+          setVibes(vibesResult.data);
+          setPage(0);
+          setHasMore(vibesResult.data.length === PAGE_SIZE);
+        }
       } else {
-        setVibes(prev => [...prev, ...vibesData]);
+        // Background pagination fetch
+        const { data: vibesData } = await supabase
+          .rpc('get_shuffled_vibes', { seed_val: seed })
+          .range(start, end);
+        
+        if (vibesData) {
+          setVibes(prev => [...prev, ...vibesData]);
+          setHasMore(vibesData.length === PAGE_SIZE);
+          setPage(currentPage);
+        }
       }
-      
-      setHasMore(vibesData.length === PAGE_SIZE);
-      if (!isInitial) setPage(currentPage);
+    } catch (error) {
+      console.error("Vibe sync failed:", error);
+    } finally {
+      if (isInitial) setIsLoading(false);
+      else setIsFetchingMore(false);
     }
-    
-    if (isInitial) setIsLoading(false);
-    else setIsFetchingMore(false);
   };
 
   const fetchComments = async (vibeId: string) => {
@@ -849,7 +842,6 @@ export default function MainPage() {
                   {user.user_metadata.full_name && (
                     <p className="text-xs font-bold text-gray-300 leading-tight">{user.user_metadata.full_name}</p>
                   )}
-                  <p className="text-[9px] font-medium text-gray-500 leading-tight">{user.email}</p>
                 </div>
               </div>
               <img 
@@ -863,8 +855,10 @@ export default function MainPage() {
             </div>
 
           ) : (
-            <button onClick={handleLogin} className="flex items-center gap-2 px-6 py-3 sm:px-8 sm:py-4 bg-black border border-white/10 text-white rounded-full font-bold uppercase tracking-[0.2em] text-[11px] sm:text-xs shadow-2xl hover:bg-white/5 hover:border-vibe-accent/50 transition-all active:scale-95 group">
-              <LogIn size={18} className="group-hover:text-vibe-accent transition-colors" /> <span className="hidden sm:inline">LOGIN</span>
+            <button onClick={handleLogin} className="flex items-center gap-3 px-6 py-3 sm:px-8 sm:py-4 bg-black border border-white/10 text-white rounded-full font-bold uppercase tracking-[0.2em] text-[11px] sm:text-xs shadow-2xl hover:bg-white/5 hover:border-vibe-accent/50 transition-all active:scale-95 group">
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-4 h-4 sm:w-5 sm:h-5 bg-white rounded-full p-0.5" alt="G" />
+              <span className="hidden sm:inline">LOGIN</span>
+              <span className="sm:hidden text-[9px]">LOGIN</span>
             </button>
 
 
@@ -930,9 +924,6 @@ export default function MainPage() {
                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-6">
                       <div className="text-vibe-accent text-[10px] font-black uppercase tracking-[0.4em] mb-2 opacity-80">Spotlight of the Day</div>
                       <div className="text-white font-black text-2xl mb-1 leading-tight">{todayVibe.title}</div>
-                                            {todayVibe.user_email && (
-                        <p className="text-gray-400 text-xs font-medium tracking-tight">By {todayVibe.user_email}</p>
-                      )}
                    </div>
                  </>
                ) : (
@@ -1283,12 +1274,13 @@ export default function MainPage() {
                       ) : (
                           <div className="bg-black/40 border border-white/5 rounded-2xl p-10 text-center mb-12 shadow-2xl">
                              <p className="text-gray-400 text-sm mb-6 font-medium italic">Join the vibration to leave your feedback.</p>
-                             <button 
-                               onClick={handleLogin} 
-                               className="px-8 py-3 bg-black border border-white/10 text-white rounded-full font-bold uppercase tracking-[0.2em] text-xs hover:border-vibe-accent/50 transition-all shadow-xl"
-                             >
-                               LOGIN WITH GOOGLE
-                             </button>
+                           <button 
+                             onClick={handleLogin} 
+                             className="flex items-center gap-3 mx-auto px-8 py-3 bg-black border border-white/10 text-white rounded-full font-bold uppercase tracking-[0.2em] text-xs hover:border-vibe-accent/50 transition-all shadow-xl group"
+                           >
+                             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 bg-white rounded-full p-0.5" alt="G" />
+                             LOGIN
+                           </button>
                           </div>
                       )}
 
@@ -1380,7 +1372,7 @@ export default function MainPage() {
                    >
                      <div className="flex items-center gap-3">
                         <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5 bg-white rounded-full p-0.5" alt="G" />
-                        <span className="font-black tracking-[0.2em] text-sm group-hover:text-vibe-accent transition-colors text-white">LOGIN WITH GOOGLE</span>
+                        <span className="font-black tracking-[0.2em] text-sm group-hover:text-vibe-accent transition-colors text-white">LOGIN</span>
                      </div>
                      <span className="text-[9px] text-gray-500 uppercase tracking-widest">Connect to Vibe Gallery Network</span>
                    </button>
