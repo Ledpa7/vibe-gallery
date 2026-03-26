@@ -242,32 +242,35 @@ export default function MainPage() {
   }
 
   const getProjectByDateOffset = useCallback((offset: number): Vibe | null => {
-    const today = new Date();
-    const targetDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset);
-    const year = targetDate.getFullYear();
-    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
-    const day = String(targetDate.getDate()).padStart(2, '0');
-    const targetDateString = `${year}-${month}-${day}`;
+    // 🔍 SMART SEARCH: If no project on 'target date', keep looking back until we find one
+    // Limit to 30 days history to prevent infinite loops
+    for (let currentOffset = offset; currentOffset < offset + 30; currentOffset++) {
+      const target = new Date();
+      target.setDate(target.getDate() - currentOffset);
+      const targetStr = target.toISOString().split('T')[0];
 
-    // 1. Try to find the finalized winner from the pre-calculated view (Yesterday and before)
-    const dailyWinner = dailyTopVibes.find(v => v.vibe_date === targetDateString);
-    if (dailyWinner) return dailyWinner;
-
-    // 2. If it's "Today" (offset 0) and no winner is finalized yet, 
-    // find the current leader from the live vibes list in memory
-    if (offset === 0 && vibes.length > 0) {
-      const todayVibes = vibes.filter(v => {
-        const vDate = new Date(v.created_at);
-        // Compare dates in local time to match user expectation
-        return vDate.getFullYear() === today.getFullYear() &&
-               vDate.getMonth() === today.getMonth() &&
-               vDate.getDate() === today.getDate();
+      // 1. Try to find match in dailyTopVibes
+      const match = dailyTopVibes.find(v => {
+        if (!v.vibe_date) return false;
+        const dbDate = v.vibe_date.includes('T') ? v.vibe_date.split('T')[0] : v.vibe_date;
+        return dbDate === targetStr;
       });
 
-      if (todayVibes.length > 0) {
-        // Return the one with the most engagement (likes)
-        return [...todayVibes].sort((a, b) => (b.likes || 0) - (a.likes || 0))[0];
+      if (match) return match;
+
+      // 2. If it's offset 0 and no match yet, check current live leading vibes
+      if (currentOffset === 0 && vibes.length > 0) {
+        const todayVibes = vibes.filter(v => {
+          const vDate = new Date(v.created_at).toISOString().split('T')[0];
+          return vDate === targetStr;
+        });
+        if (todayVibes.length > 0) {
+          return [...todayVibes].sort((a, b) => (b.likes || 0) - (a.likes || 0))[0];
+        }
       }
+      
+      // If we are looking for a SPECIFIC history entry (not today), 
+      // and we didn't find it, we'll continue the loop to the next day
     }
 
     return null;
@@ -1089,23 +1092,37 @@ export default function MainPage() {
           >
             <div className="flex items-center justify-center gap-8 w-full">
               {/* Yesterday Ghost Preview */}
-              {isTodayProjectModal && getProjectByDateOffset(historyOffset + 1) && (
-                <motion.div 
-                  initial={{ opacity: 0, x: 50, scale: 0.8 }}
-                  animate={{ opacity: 1, x: 0, scale: 0.9 }}
-                  className="hidden xl:flex glass-card w-48 h-[60vh] shrink-0 overflow-hidden relative cursor-pointer group/ghost border-vibe-accent/20"
-                  onClick={(e) => { e.stopPropagation(); setHistoryOffset(prev => prev + 1); }}
-                >
-                  <img src={getProjectByDateOffset(historyOffset + 1)!.image} className="absolute inset-0 w-full h-full object-cover blur-md opacity-20 group-hover/ghost:opacity-40 transition-opacity" />
-                  <div className="absolute inset-0 bg-gradient-to-l from-[#0f0f11] via-transparent to-transparent z-10" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
-                    <div className="p-6 rounded-full bg-vibe-accent/10 border border-vibe-accent/30 shadow-[0_0_30px_rgba(139,92,246,0.3)] group-hover/ghost:bg-vibe-accent/20 group-hover/ghost:scale-110 transition-all duration-300">
-                      <ChevronLeft size={56} className="text-vibe-accent drop-shadow-[0_0_15px_rgba(139,92,246,1)]" />
-                    </div>
-                    <p className="text-[12px] uppercase tracking-[0.3em] font-black text-vibe-accent mt-6 drop-shadow-sm">Yesterday's Vibe</p>
-                  </div>
-                </motion.div>
-              )}
+              {isTodayProjectModal && (() => {
+                // Determine the next actually available historic project offset
+                let nextOffset = historyOffset + 1;
+                let foundNext = null;
+                while (nextOffset < 30) {
+                  foundNext = getProjectByDateOffset(nextOffset);
+                  if (foundNext && foundNext.id !== displayVibe?.id) break;
+                  nextOffset++;
+                }
+                
+                if (foundNext) {
+                  return (
+                    <motion.div 
+                      initial={{ opacity: 0, x: 50, scale: 0.8 }}
+                      animate={{ opacity: 1, x: 0, scale: 0.9 }}
+                      className="hidden xl:flex glass-card w-48 h-[60vh] shrink-0 overflow-hidden relative cursor-pointer group/ghost border-vibe-accent/20"
+                      onClick={(e) => { e.stopPropagation(); setHistoryOffset(nextOffset); }}
+                    >
+                      <img src={foundNext.image} className="absolute inset-0 w-full h-full object-cover blur-md opacity-20 group-hover/ghost:opacity-40 transition-opacity" />
+                      <div className="absolute inset-0 bg-gradient-to-l from-[#0f0f11] via-transparent to-transparent z-10" />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
+                        <div className="p-6 rounded-full bg-vibe-accent/10 border border-vibe-accent/30 shadow-[0_0_30px_rgba(139,92,246,0.3)] group-hover/ghost:bg-vibe-accent/20 group-hover/ghost:scale-110 transition-all duration-300">
+                          <ChevronLeft size={56} className="text-vibe-accent drop-shadow-[0_0_15px_rgba(139,92,246,1)]" />
+                        </div>
+                        <p className="text-[12px] uppercase tracking-[0.3em] font-black text-vibe-accent mt-6 drop-shadow-sm">Earlier Vibe</p>
+                      </div>
+                    </motion.div>
+                  );
+                }
+                return null;
+              })()}
 
               <motion.div 
                 layoutId={selectedId!}
@@ -1195,7 +1212,7 @@ export default function MainPage() {
                             {isTodayProjectModal && (
                               <div className="flex items-center gap-2 text-vibe-accent bg-vibe-accent/10 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border border-vibe-accent/20">
                                 <Calendar size={12} />
-                                {new Date(new Date().setDate(new Date().getDate() - historyOffset)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                {new Date(displayVibe.vibe_date || displayVibe.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                               </div>
                             )}
                         </div>
@@ -1360,23 +1377,36 @@ export default function MainPage() {
               </motion.div>
 
               {/* Tomorrow Ghost Preview */}
-              {isTodayProjectModal && historyOffset > 0 && getProjectByDateOffset(historyOffset - 1) && (
-                <motion.div 
-                  initial={{ opacity: 0, x: -50, scale: 0.8 }}
-                  animate={{ opacity: 1, x: 0, scale: 0.9 }}
-                  className="hidden xl:flex glass-card w-48 h-[60vh] shrink-0 overflow-hidden relative cursor-pointer group/ghost border-vibe-accent/20"
-                  onClick={(e) => { e.stopPropagation(); setHistoryOffset(prev => prev - 1); }}
-                >
-                  <img src={getProjectByDateOffset(historyOffset - 1)!.image} className="absolute inset-0 w-full h-full object-cover blur-md opacity-20 group-hover/ghost:opacity-40 transition-opacity" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#0f0f11] via-transparent to-transparent z-10" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
-                    <div className="p-6 rounded-full bg-vibe-accent/10 border border-vibe-accent/30 shadow-[0_0_30px_rgba(139,92,246,0.3)] group-hover/ghost:bg-vibe-accent/20 transition-all duration-300">
-                      <ChevronRight size={56} className="text-vibe-accent drop-shadow-[0_0_20px_rgba(139,92,246,1)] group-hover/ghost:scale-125 transition-transform" />
-                    </div>
-                    <p className="text-[12px] uppercase tracking-[0.3em] font-black text-vibe-accent mt-6 drop-shadow-sm">Tomorrow</p>
-                  </div>
-                </motion.div>
-              )}
+              {isTodayProjectModal && historyOffset > 0 && (() => {
+                let prevOffset = historyOffset - 1;
+                let foundPrev = null;
+                while (prevOffset >= 0) {
+                  foundPrev = getProjectByDateOffset(prevOffset);
+                  if (foundPrev && foundPrev.id !== displayVibe?.id) break;
+                  prevOffset--;
+                }
+                
+                if (foundPrev) {
+                  return (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -50, scale: 0.8 }}
+                      animate={{ opacity: 1, x: 0, scale: 0.9 }}
+                      className="hidden xl:flex glass-card w-48 h-[60vh] shrink-0 overflow-hidden relative cursor-pointer group/ghost border-vibe-accent/20"
+                      onClick={(e) => { e.stopPropagation(); setHistoryOffset(prevOffset); }}
+                    >
+                      <img src={foundPrev.image} className="absolute inset-0 w-full h-full object-cover blur-md opacity-20 group-hover/ghost:opacity-40 transition-opacity" />
+                      <div className="absolute inset-0 bg-gradient-to-r from-[#0f0f11] via-transparent to-transparent z-10" />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
+                        <div className="p-6 rounded-full bg-vibe-accent/10 border border-vibe-accent/30 shadow-[0_0_30px_rgba(139,92,246,0.3)] group-hover/ghost:bg-vibe-accent/20 transition-all duration-300">
+                          <ChevronRight size={56} className="text-vibe-accent drop-shadow-[0_0_20px_rgba(139,92,246,1)] group-hover/ghost:scale-125 transition-transform" />
+                        </div>
+                        <p className="text-[12px] uppercase tracking-[0.3em] font-black text-vibe-accent mt-6 drop-shadow-sm">Later Vibe</p>
+                      </div>
+                    </motion.div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </motion.div>
         )}
