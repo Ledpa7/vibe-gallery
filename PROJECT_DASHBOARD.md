@@ -17,7 +17,7 @@
 - **[초압축 다이어트]**: 480px 해상도 고정 및 파일당 **30KB 미만** 압축 적용 (50MB 스토리지 쿼터 최적화).
 - **[멀티 버킷 대응]**: `vibe-images` 버킷 포화 시 자동으로 `vibe-images2`로 넘어가는 **Failover** 시스템 구축.
 
-### **3. 📈 성능 최적화### 🚀 Performance Optimizations (Phase 1)
+### **3. 📈 성능 최적화 (Performance Optimizations)**
 - [x] **Global In-Memory Caching**: Implemented a 5-minute TTL cache for gallery data to bypass redundant Supabase hits.
 - [x] **Memoized Event Handlers**: Replaced inline arrow functions with `useCallback` to prevent `VibeCard` (React.memo) re-renders.
 - [x] **Selective Database Fetching**: Refined queries to only fetch columns necessary for the grid UI, reducing JSON payload.
@@ -27,6 +27,16 @@
 - **[카운트 표시]**: 갤러리 그리드 상단에 **`Total Vibes (X)`** 레이블 및 실시간 상태등 추가.
 - **[로그인 안정화]**: 신규 유저 로그인 시 프로필 정보가 즉시 나타나지 않던 렌더링 딜레이 해결.
 - **[명예의 전당]**: `daily_top_vibes` 연동 및 렌더링 의존성 버그 해결.
+
+---
+
+## 📅 최근 업데이트 (2026-03-24)
+
+### **🚀 성능 및 UX 고도화 (Performance & UX)**
+- **[모달 인터랙션 분리]**: 업로드 폼(Upload)과 조회(Detail View) 모달 간의 닫기 동작(Context)을 명확히 분리하여 UX 개선.
+- **[실시간 피드백]**: 사용자 입력 필드(Input Fields)에 대한 실시간 타이핑 피드백 기능 추가.
+- **[브라우저 호환성]**: Reddit 등 인앱 브라우저로 접속하는 유저들을 위한 환경 가드(Browser Guard) 구현.
+- **[반응성 최적화]**: 캐싱(Caching) 및 메모이제이션(Memoization)을 활용해 갤러리의 지속적인 성능과 고반응성 유지.
 
 ---
 

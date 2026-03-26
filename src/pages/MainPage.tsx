@@ -377,7 +377,7 @@ export default function MainPage() {
         const [topVibesResult, totalCountResult, vibesResult] = await Promise.all([
           supabase.from('daily_top_vibes').select('id, title, summary, image, tech, likes, vibe_date').order('vibe_date', { ascending: false }),
           supabase.from('vibes').select('id', { count: 'exact', head: true }),
-          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, image, tech, likes, created_at').range(start, end)
+          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, description, image, tech, link, likes, created_at').range(start, end)
         ]);
           
         if (topVibesResult.data) {
@@ -401,11 +401,12 @@ export default function MainPage() {
         }
       } else {
         // Background pagination fetch
-        const { data: vibesData } = await supabase
+        const { data: vibesData } = (await supabase
           .rpc('get_shuffled_vibes', { seed_val: seed })
-          .range(start, end);
+          .select('id, title, summary, description, image, tech, link, likes, created_at')
+          .range(start, end)) as { data: Vibe[] | null };
         
-        if (vibesData) {
+        if (vibesData && Array.isArray(vibesData)) {
           setVibes(prev => [...prev, ...vibesData]);
           setHasMore(vibesData.length === PAGE_SIZE);
           setPage(currentPage);
@@ -1223,7 +1224,21 @@ export default function MainPage() {
                           href={displayVibe.link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="vibe-button w-full justify-center py-4 text-center ring-1 ring-vibe-accent bg-vibe-accent/5 hover:bg-vibe-accent/10"
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            console.log("[VibeGallery] MouseDown on Visit Project. Link:", displayVibe.link);
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log("[VibeGallery] Click on Visit Project. Executing navigation...");
+                          }}
+                          style={{ 
+                            position: 'relative', 
+                            zIndex: 99999, 
+                            display: 'flex',
+                            pointerEvents: 'auto'
+                          }}
+                          className="vibe-button w-full justify-center py-4 text-center ring-1 ring-vibe-accent bg-vibe-accent/5 hover:bg-vibe-accent/10 transition-all cursor-pointer pointer-events-auto"
                         >
                           <span className="font-bold tracking-widest uppercase text-xs">Visit Project</span>
                           <ArrowUpRight size={18} />
