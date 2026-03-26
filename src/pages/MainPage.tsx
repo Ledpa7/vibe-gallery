@@ -135,6 +135,7 @@ export default function MainPage() {
   }, []);
   const [isVoting, setIsVoting] = useState<string | null>(null);
   const [isDeletingVibe, setIsDeletingVibe] = useState<string | null>(null);
+  const [editVibeId, setEditVibeId] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   
   // Pagination State
@@ -380,7 +381,7 @@ export default function MainPage() {
         const [topVibesResult, totalCountResult, vibesResult] = await Promise.all([
           supabase.from('daily_top_vibes').select('id, title, summary, description, image, tech, link, likes, vibe_date').order('vibe_date', { ascending: false }),
           supabase.from('vibes').select('id', { count: 'exact', head: true }),
-          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, description, image, tech, link, likes, created_at').range(start, end)
+          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, description, image, tech, link, likes, created_at, user_id').range(start, end)
         ]);
           
         if (topVibesResult.data) {
@@ -406,7 +407,7 @@ export default function MainPage() {
         // Background pagination fetch
         const { data: vibesData } = (await supabase
           .rpc('get_shuffled_vibes', { seed_val: seed })
-          .select('id, title, summary, description, image, tech, link, likes, created_at')
+          .select('id, title, summary, description, image, tech, link, likes, created_at, user_id')
           .range(start, end)) as { data: Vibe[] | null };
         
         if (vibesData && Array.isArray(vibesData)) {
@@ -626,6 +627,7 @@ export default function MainPage() {
 
   const closeUploadModal = useCallback(() => {
     setShowUploadModal(false);
+    setEditVibeId(null);
     setImageFile(null);
     setImagePreview(null);
     setCrop(undefined);
@@ -669,8 +671,13 @@ export default function MainPage() {
 
     // 1. Get fresh user session to avoid stale IDs which trigger RLS failures
     const { data: { user: currentUser } } = await supabase.auth.getUser();
-    if (!currentUser || !imageFile) {
-      toast.error("Please login again or select a vibe screenshot!");
+    if (!currentUser) {
+      toast.error("Please login again!");
+      return;
+    }
+    // For new uploads, image is required. For edits, it's optional.
+    if (!editVibeId && !imageFile) {
+      toast.error("Please select a vibe screenshot!");
       return;
     }
 
@@ -698,75 +705,102 @@ export default function MainPage() {
     }
 
     try {
-      // 2. Use the already confirmed blob or generate one now
-      let finalBlob = finalCroppedBlob;
-      if (!finalBlob) {
-        if (!imgRef.current || !completedCrop) {
-          toast.error("Please frame your shot correctly!");
-          return;
-        }
-        finalBlob = await generateCroppedBlob();
-      }
-      const finalFile = new File([finalBlob], 'vibe.webp', { type: 'image/webp' });
-
-      // 3. Final Compression (Extreme Efficiency at 480px)
-      const options = { maxSizeMB: 0.03, maxWidthOrHeight: 480, useWebWorker: true };
-      const microFile = await imageCompression(finalFile, options);
-
-      // 4. Try upload with Multi-Bucket Failover
-      const fileName = `${Date.now()}.webp`;
-      const filePath = `${currentUser.id}/${fileName}`;
       let finalPublicUrl = '';
       let usedBucket = '';
-      let uploadSuccess = false;
+      let filePath = '';
 
-      for (const bucketName of BUCKET_CANDIDATES) {
-          const { error: uploadError } = await supabase.storage
-            .from(bucketName)
-            .upload(filePath, microFile);
-
-          if (!uploadError) {
-              const { data: { publicUrl } } = supabase.storage
-                .from(bucketName)
-                .getPublicUrl(filePath);
-              finalPublicUrl = publicUrl;
-              usedBucket = bucketName;
-              uploadSuccess = true;
-              break; // Success! Exit loop
-          } else {
-              console.warn(`Bucket [${bucketName}] failed:`, uploadError.message);
-              // If it's not a quota/network error, we might still fail, but we'll try the next bucket as a fallback
+      // Only process image if user selected a new one
+      if (imageFile) {
+        // 2. Use the already confirmed blob or generate one now
+        let finalBlob = finalCroppedBlob;
+        if (!finalBlob) {
+          if (!imgRef.current || !completedCrop) {
+            toast.error("Please frame your shot correctly!");
+            setIsUploading(false);
+            return;
           }
+          finalBlob = await generateCroppedBlob();
+        }
+        const finalFile = new File([finalBlob], 'vibe.webp', { type: 'image/webp' });
+
+        // 3. Final Compression (Extreme Efficiency at 480px)
+        const options = { maxSizeMB: 0.03, maxWidthOrHeight: 480, useWebWorker: true };
+        const microFile = await imageCompression(finalFile, options);
+
+        // 4. Try upload with Multi-Bucket Failover
+        const fileName = `${Date.now()}.webp`;
+        filePath = `${currentUser.id}/${fileName}`;
+        let uploadSuccess = false;
+
+        for (const bucketName of BUCKET_CANDIDATES) {
+            const { error: uploadError } = await supabase.storage
+              .from(bucketName)
+              .upload(filePath, microFile);
+
+            if (!uploadError) {
+                const { data: { publicUrl } } = supabase.storage
+                  .from(bucketName)
+                  .getPublicUrl(filePath);
+                finalPublicUrl = publicUrl;
+                usedBucket = bucketName;
+                uploadSuccess = true;
+                break;
+            } else {
+                console.warn(`Bucket [${bucketName}] failed:`, uploadError.message);
+            }
+        }
+
+        if (!uploadSuccess) throw new Error("All storage buckets are full. Please contact the administrator.");
       }
 
-      if (!uploadSuccess) throw new Error("All storage buckets are full. Please contact the administrator.");
+      const techArray = techInput ? techInput.split(',').map(t => t.trim()).filter(Boolean) : ['N/A'];
 
-      // 5. Insert Vibe Record with the successful publicUrl
-      const { error: dbError } = await supabase
-        .from('vibes')
-        .insert({ 
-          title: title,
-          summary: summary,
-          image: finalPublicUrl,
-          link: link,
-          tech: techInput ? techInput.split(',').map(t => t.trim()).filter(Boolean) : ['N/A'],
-          user_id: currentUser.id,
-          user_email: currentUser.email ?? 'Anonymous', 
-          likes: 0,
-          dislikes: 0
-        });
+      if (editVibeId) {
+        // === UPDATE MODE ===
+        const updateData: Record<string, any> = {
+          title, summary, link, tech: techArray,
+          updated_at: new Date().toISOString()
+        };
+        if (finalPublicUrl) updateData.image = finalPublicUrl;
 
-      if (dbError) {
-        // Cleanup orphaned image from the specific bucket used
-        await supabase.storage.from(usedBucket).remove([filePath]);
-        throw dbError;
+        // Security: non-admin can only edit their own
+        let updateQuery = supabase
+          .from('vibes')
+          .update(updateData)
+          .eq('id', editVibeId);
+        
+        if (!isAdmin) {
+          updateQuery = updateQuery.eq('user_id', currentUser.id);
+        }
+
+        const { error: dbError } = await updateQuery;
+        if (dbError) throw dbError;
+        closeUploadModal();
+        fetchVibes(0, true);
+        toast.success('Your Vibe has been updated! ✨');
+      } else {
+        // === INSERT MODE ===
+        const { error: dbError } = await supabase
+          .from('vibes')
+          .insert({ 
+            title, summary,
+            image: finalPublicUrl,
+            link,
+            tech: techArray,
+            user_id: currentUser.id,
+            user_email: currentUser.email ?? 'Anonymous', 
+            likes: 0,
+            dislikes: 0
+          });
+
+        if (dbError) {
+          if (usedBucket && filePath) await supabase.storage.from(usedBucket).remove([filePath]);
+          throw dbError;
+        }
+        closeUploadModal();
+        fetchVibes();
+        toast.success('Your Vibe has been framed and uploaded! 🚀');
       }
-
-      // Reset all states via shared function
-      closeUploadModal();
-      
-      fetchVibes();
-      toast.success('Your Vibe has been framed and uploaded! 🚀');
     } catch (error: any) {
       toast.error(error.message || "Failed to publish vibe.");
       console.error("Publish error:", error);
@@ -1209,6 +1243,39 @@ export default function MainPage() {
                               {isDeletingVibe === displayVibe.id ? 'Deleting...' : (isAdmin && displayVibe.user_id !== user.id ? 'Admin Delete' : 'Delete')}
                             </button>
                           )}
+                          {user && (isAdmin || displayVibe.user_id === user.id) && (
+                            <button
+                              onClick={() => {
+                                // Capture data before closing
+                                const vibeData = { ...displayVibe };
+                                setEditVibeId(vibeData.id);
+                                setSelectedId(null);
+                                setTimeout(() => {
+                                  setShowUploadModal(true);
+                                  setTimeout(() => {
+                                    const form = document.querySelector('form') as HTMLFormElement;
+                                    if (form) {
+                                      const titleInput = form.querySelector('[name=title]') as HTMLInputElement;
+                                      const summaryInput = form.querySelector('[name=summary]') as HTMLInputElement;
+                                      const linkInput = form.querySelector('[name=link]') as HTMLInputElement;
+                                      const techInput = form.querySelector('[name=tech]') as HTMLInputElement;
+                                      if (titleInput) titleInput.value = vibeData.title || '';
+                                      if (summaryInput) summaryInput.value = vibeData.summary || '';
+                                      if (linkInput) linkInput.value = vibeData.link || '';
+                                      if (techInput) techInput.value = vibeData.tech?.join(', ') || '';
+                                    }
+                                    if (vibeData.image) {
+                                      setImagePreview(vibeData.image);
+                                      setCropPreview(vibeData.image);
+                                    }
+                                  }, 150);
+                                }, 250);
+                              }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-vibe-accent/10 text-vibe-accent hover:bg-vibe-accent/20 rounded-md border border-vibe-accent/20 transition-all font-bold uppercase tracking-widest text-[10px]"
+                            >
+                              <Upload size={12} /> Edit
+                            </button>
+                          )}
                             {isTodayProjectModal && (
                               <div className="flex items-center gap-2 text-vibe-accent bg-vibe-accent/10 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border border-vibe-accent/20">
                                 <Calendar size={12} />
@@ -1260,6 +1327,7 @@ export default function MainPage() {
                           <span className="font-bold tracking-widest uppercase text-xs">Visit Project</span>
                           <ArrowUpRight size={18} />
                         </a>
+
                         
                         <div className="flex items-center gap-3 mt-6">
                           <button 
@@ -1431,7 +1499,7 @@ export default function MainPage() {
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-bold flex items-center gap-2 tracking-tight uppercase">
                    <Upload className="text-vibe-accent" size={24} />
-                   Exhibit Your Work
+                   {editVibeId ? 'Update Your Vibe' : 'Exhibit Your Work'}
                 </h2>
                 <button 
                   onClick={closeUploadModal}
@@ -1601,9 +1669,9 @@ export default function MainPage() {
                         {isUploading ? (
                           <>
                             <Loader2 className="animate-spin" size={20} />
-                            OPTIMIZING & PUBLISHING...
+                            {editVibeId ? 'SAVING CHANGES...' : 'OPTIMIZING & PUBLISHING...'}
                           </>
-                        ) : 'PUBLISH TO GALLERY'}
+                        ) : editVibeId ? 'SAVE CHANGES' : 'PUBLISH TO GALLERY'}
                      </button>
                      <p className="text-[11px] text-gray-600 text-center mt-6 uppercase tracking-wider font-medium opacity-60">Ready for the community vibe check?</p>
                   </div>
