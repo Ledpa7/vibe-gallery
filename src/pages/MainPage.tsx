@@ -375,7 +375,7 @@ export default function MainPage() {
       if (isInitial) {
         // 🚀 CRITICAL OPTIMIZATION: Combine ALL global initial requests into one Promise.all
         const [topVibesResult, totalCountResult, vibesResult] = await Promise.all([
-          supabase.from('daily_top_vibes').select('id, title, summary, image, tech, likes, vibe_date').order('vibe_date', { ascending: false }),
+          supabase.from('daily_top_vibes').select('id, title, summary, description, image, tech, link, likes, vibe_date').order('vibe_date', { ascending: false }),
           supabase.from('vibes').select('id', { count: 'exact', head: true }),
           supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, description, image, tech, link, likes, created_at').range(start, end)
         ]);
@@ -1179,7 +1179,7 @@ export default function MainPage() {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-6 flex-wrap">
                             <h2 className="text-4xl font-black tracking-tight">{displayVibe.title}</h2>
-                          {(displayVibe.user_id === user?.id || isAdmin) && (
+                          {user && (isAdmin || displayVibe.user_id === user.id) && (
                             <button 
                               disabled={isDeletingVibe === displayVibe.id}
                               onClick={() => handleDeleteVibe(displayVibe.id, displayVibe.image, displayVibe.user_id)}
@@ -1189,7 +1189,7 @@ export default function MainPage() {
                               )}
                             >
                               <Trash2 size={12} /> 
-                              {isDeletingVibe === displayVibe.id ? 'Deleting...' : (isAdmin && displayVibe.user_id !== user?.id ? 'Admin Delete' : 'Delete')}
+                              {isDeletingVibe === displayVibe.id ? 'Deleting...' : (isAdmin && displayVibe.user_id !== user.id ? 'Admin Delete' : 'Delete')}
                             </button>
                           )}
                             {isTodayProjectModal && (

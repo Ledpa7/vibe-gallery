@@ -17,6 +17,20 @@
 - **[초압축 다이어트]**: 480px 해상도 고정 및 파일당 **30KB 미만** 압축 적용 (50MB 스토리지 쿼터 최적화).
 - **[멀티 버킷 대응]**: `vibe-images` 버킷 포화 시 자동으로 `vibe-images2`로 넘어가는 **Failover** 시스템 구축.
 
+## 🚨 CRITICAL ISSUE & RETROSPECTIVE (2026-03-23 ~ 03-26)
+
+### incident: "Visit Project" Link Dead during Viral Peak
+- **Period:** March 23, 14:10 (Commit `014f042`) ~ March 26, 21:15 (Commit `3cc71b8`)
+- **Root Cause:** Due to SEO/Routing optimization, the `link` and `description` fields were accidentally removed from the `supabase.rpc('get_shuffled_vibes')` select statement.
+- **Impact:** While the gallery looked perfect, NO user could actually visit the showcased projects for 3 days. This happened exactly during a Reddit viral peak, leading to massive conversion loss.
+- **Resolution:**
+  1. Restored `link` and `description` to all fetch queries.
+  2. Enhanced button logic with `onMouseDown` + `stopPropagation` + `zIndex: 99999` for maximum durability.
+  3. Reverted design to premium transparent/ring style to maintain brand aesthetic.
+- **Anti-Gravity Post-Mortem:** NEVER assume a data field is present unless explicitly selected. Core conversion paths (Links, Payment, Upload) MUST be manually verified after any query/routing changes.
+
+---
+
 ### **3. 📈 성능 최적화 (Performance Optimizations)**
 - [x] **Global In-Memory Caching**: Implemented a 5-minute TTL cache for gallery data to bypass redundant Supabase hits.
 - [x] **Memoized Event Handlers**: Replaced inline arrow functions with `useCallback` to prevent `VibeCard` (React.memo) re-renders.
