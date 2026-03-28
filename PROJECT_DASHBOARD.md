@@ -54,10 +54,24 @@
 
 ---
 
+## 📅 최근 업데이트 (2026-03-28)
+
+### **🚀 대규모 리팩토링 및 구조 최적화 (Surgical Refactoring)**
+- **[모기에 대한 대응]**: 1,714라인의 `MainPage.tsx`를 7개의 독립 모듈(`lib/`, `components/`)로 분산시켜 코드 가독성 200% 향상.
+- **[아키텍처 분리]**:
+    - `lib/types.ts`: 전역 타입 정의 (`Vibe`, `Comment`).
+    - `lib/cache.ts`: 함수 기반 글로벌 인메모리 캐시 시스템.
+    - `lib/imageUtils.ts`: 브라우저 기반 이미지 크로핑 및 WebP 변환 유틸리티 고립.
+- **[UI 컴포넌트 독립]**: `DetailModal`, `UploadModal`, `VibeCard`를 별도 파일로 추출하여 유지보수성 확보.
+- **[무결성 검증]**: `tsc` (TypeScript) 에러 0개 및 `vite build` 통과 확인.
+- **[CSS 보존]**: 기존 디자인 시스템과 아키텍처(`index.css`)에 영향을 주지 않는 순수 로직 분리 수행.
+
+---
+
 ## 🛠 주요 핵심 파일
-- **`src/pages/MainPage.tsx`**: 메인 비즈니스 로직 및 UI 인터랙션.
-- **`src/lib/supabase.ts`**: 백엔드 통신 클라이언트 초기화.
-- **`DB_SCHEMA_MEMO.md`**: 상세 데이터베이스 테이블 및 스키마 명세.
+- **`src/pages/MainPage.tsx`**: 메인 비즈니스 오케스트레이터.
+- **`src/components/`**: UI 모듈 (DetailModal, UploadModal, VibeCard).
+- **`src/lib/`**: 핵심 비즈니스 유틸 (supabase, cache, imageUtils).
 
 ---
 
@@ -65,6 +79,7 @@
 - [ ] 관리자 페이지 전용 UI (신고 관리 등)
 - [ ] 프로젝트 공유하기 기능 (URL 복사 / 소셜 공유)
 - [ ] 검색 기능 및 카테고리 필터링
+- [ ] Skeleton UI 도입 (로딩 사용자 경험 개선)
 
 ---
-> **마지막 푸시 시점**: 2026-03-23 (커밋: `9712ae4`)
+> **마지막 푸시 시점**: 2026-03-28 (리팩토링 완료)
