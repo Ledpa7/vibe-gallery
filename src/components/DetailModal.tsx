@@ -1,8 +1,8 @@
-import { useState, useCallback } from 'react';
+import { memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ThumbsUp, ThumbsDown, ArrowUpRight, Layers, Plus, HelpCircle,
-  X, Upload, History, ChevronLeft, ChevronRight, Calendar,
+  Upload, History, ChevronLeft, ChevronRight, Calendar,
   Trash2
 } from 'lucide-react';
 import { cn } from '../lib/cn';
@@ -40,7 +40,7 @@ interface DetailModalProps {
   onEditVibe: (vibe: Vibe) => void;
 }
 
-export default function DetailModal({
+const DetailModal = memo(function DetailModal({
   selectedId,
   displayVibe,
   isTodayProjectModal,
@@ -408,4 +408,6 @@ export default function DetailModal({
       )}
     </AnimatePresence>
   );
-}
+});
+
+export default DetailModal;

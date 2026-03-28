@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { 
   Plus, HelpCircle, LogOut, Loader2
 } from 'lucide-react';
@@ -18,6 +18,47 @@ import UploadModal from '../components/UploadModal';
 
 // Storage Settings: Support multiple buckets for 50MB-per-bucket free tier bypass
 const BUCKET_CANDIDATES = ['vibe-images', 'vibe-images2'];
+
+// ═══════════════════════════════════════════════════
+// 🔥 OPTIMIZATION: Static objects declared OUTSIDE component
+//    to prevent re-creation on every render cycle
+// ═══════════════════════════════════════════════════
+const TOAST_OPTIONS = {
+  duration: 3500,
+  style: {
+    background: '#1a1a2e',
+    color: '#e0e0e0',
+    border: '1px solid rgba(139, 92, 246, 0.3)',
+    borderRadius: '12px',
+    fontSize: '13px',
+    fontWeight: '600' as const,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 20px rgba(139,92,246,0.15)',
+    backdropFilter: 'blur(12px)',
+  },
+  success: {
+    iconTheme: { primary: '#8b5cf6', secondary: '#fff' },
+  },
+  error: {
+    iconTheme: { primary: '#ef4444', secondary: '#fff' },
+  },
+};
+
+const GRID_VARIANTS = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.05
+    }
+  }
+};
+
+const CARD_VARIANTS = {
+  hidden: { opacity: 0, scale: 0.8 },
+  show: { opacity: 1, scale: 1 }
+};
+
+const PAGE_SIZE = 17;
 
 export default function MainPage() {
   const navigate = useNavigate();
@@ -39,17 +80,6 @@ export default function MainPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isTodayProjectModal, setIsTodayProjectModal] = useState(false);
   const [historyOffset, setHistoryOffset] = useState(0);
-
-  // Memoized Handlers for React.memo
-  const handleCardClick = useCallback((id: string, isToday: boolean = false) => {
-    setIsTodayProjectModal(isToday);
-    setSelectedId(id);
-    if (isToday) setHistoryOffset(0);
-  }, []);
-
-  const handleCloseModal = useCallback(() => {
-    setSelectedId(null);
-  }, []);
   const [isVoting, setIsVoting] = useState<string | null>(null);
   const [isDeletingVibe, setIsDeletingVibe] = useState<string | null>(null);
   const [editVibeId, setEditVibeId] = useState<string | null>(null);
@@ -59,17 +89,28 @@ export default function MainPage() {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
-  const PAGE_SIZE = 17;
+
+  // ═══════════════════════════════════════════════════
+  // 🔥 OPTIMIZATION: All handlers wrapped in useCallback
+  //    to ensure stable references for React.memo children
+  // ═══════════════════════════════════════════════════
+
+  const handleCardClick = useCallback((id: string, isToday: boolean = false) => {
+    setIsTodayProjectModal(isToday);
+    setSelectedId(id);
+    if (isToday) setHistoryOffset(0);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedId(null);
+  }, []);
 
   const getProjectByDateOffset = useCallback((offset: number): Vibe | null => {
-    // 🔍 SMART SEARCH: If no project on 'target date', keep looking back until we find one
-    // Limit to 30 days history to prevent infinite loops
     for (let currentOffset = offset; currentOffset < offset + 30; currentOffset++) {
       const target = new Date();
       target.setDate(target.getDate() - currentOffset);
       const targetStr = target.toISOString().split('T')[0];
 
-      // 1. Try to find match in dailyTopVibes
       const match = dailyTopVibes.find(v => {
         if (!v.vibe_date) return false;
         const dbDate = v.vibe_date.includes('T') ? v.vibe_date.split('T')[0] : v.vibe_date;
@@ -78,7 +119,6 @@ export default function MainPage() {
 
       if (match) return match;
 
-      // 2. If it's offset 0 and no match yet, check current live leading vibes
       if (currentOffset === 0 && vibes.length > 0) {
         const todayVibes = vibes.filter(v => {
           const vDate = new Date(v.created_at).toISOString().split('T')[0];
@@ -88,11 +128,7 @@ export default function MainPage() {
           return [...todayVibes].sort((a, b) => (b.likes || 0) - (a.likes || 0))[0];
         }
       }
-      
-      // If we are looking for a SPECIFIC history entry (not today), 
-      // and we didn't find it, we'll continue the loop to the next day
     }
-
     return null;
   }, [dailyTopVibes, vibes]);
 
@@ -103,10 +139,83 @@ export default function MainPage() {
     [selectedId, historyOffset, vibes, getProjectByDateOffset]
   ) as Vibe | null;
 
-  const todayVibe = useMemo(() => getProjectByDateOffset(0), [getProjectByDateOffset, dailyTopVibes]);
+  const todayVibe = useMemo(() => getProjectByDateOffset(0), [getProjectByDateOffset]);
+
+  // ═══════════════════════════════════════════════════
+  // Data Fetching (useCallback for stable reference)
+  // ═══════════════════════════════════════════════════
+
+  const fetchVibes = useCallback(async (currentPage = 0, isInitial = true) => {
+    if (isInitial) setIsLoading(true);
+    else setIsFetchingMore(true);
+    
+    const start = currentPage * PAGE_SIZE;
+    const end = start + PAGE_SIZE - 1;
+    const today = new Date();
+    const seed = today.getFullYear() * 1000000 + (today.getMonth() + 1) * 10000 + today.getDate() * 100 + today.getHours();
+
+    try {
+      if (isInitial) {
+        const [topVibesResult, totalCountResult, vibesResult] = await Promise.all([
+          supabase.from('daily_top_vibes').select('id, title, summary, description, image, tech, link, likes, vibe_date').order('vibe_date', { ascending: false }),
+          supabase.from('vibes').select('id', { count: 'exact', head: true }),
+          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, description, image, tech, link, likes, created_at, user_id').range(start, end)
+        ]);
+          
+        if (topVibesResult.data) {
+          const data = topVibesResult.data as Vibe[];
+          setDailyTopVibes(data);
+          setTopVibeCache(data);
+        }
+        if (totalCountResult.count !== null) {
+          setTotalCount(totalCountResult.count);
+          setTotalCountCache(totalCountResult.count);
+        }
+        
+        const vibesData = vibesResult.data as Vibe[] | null;
+        if (vibesData) {
+          setVibes(vibesData);
+          setPage(0);
+          setHasMore(vibesData.length === PAGE_SIZE);
+          setVibeCache(vibesData);
+        }
+      } else {
+        const { data: vibesData } = (await supabase
+          .rpc('get_shuffled_vibes', { seed_val: seed })
+          .select('id, title, summary, description, image, tech, link, likes, created_at, user_id')
+          .range(start, end)) as { data: Vibe[] | null };
+        
+        if (vibesData && Array.isArray(vibesData)) {
+          setVibes(prev => [...prev, ...vibesData]);
+          setHasMore(vibesData.length === PAGE_SIZE);
+          setPage(currentPage);
+        }
+      }
+    } catch (error) {
+      console.error("Vibe sync failed:", error);
+    } finally {
+      if (isInitial) setIsLoading(false);
+      else setIsFetchingMore(false);
+    }
+  }, []);
+
+  const fetchComments = useCallback(async (vibeId: string) => {
+    if (!vibeId || vibeId === 'today-project' || vibeId === 'placeholder') return;
+    
+    const { data } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('vibe_id', vibeId)
+      .order('created_at', { ascending: true });
+    
+    if (data) setComments(data);
+  }, []);
+
+  // ═══════════════════════════════════════════════════
+  // Initialization Effect
+  // ═══════════════════════════════════════════════════
 
   useEffect(() => {
-    // Check for fresh cache before fetching
     if (isCacheFresh()) {
         const cache = getCache();
         setVibes(cache.vibes!);
@@ -117,7 +226,6 @@ export default function MainPage() {
         fetchVibes(); 
     }
 
-    // 2. Optimized User Data Refresher
     const refreshUserData = async (userId: string) => {
       try {
         const [adminResult, votesResult] = await Promise.all([
@@ -140,20 +248,14 @@ export default function MainPage() {
       }
     };
 
-    // 3. Stable Auth Change Listener (Consolidated for efficiency)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       const currentUser = session?.user ?? null;
-      
-      // Update basic user state immediately for core UI
       setUser(currentUser);
       
       if (currentUser) {
-        // Fetch detailed profile/votes logic in background on auth events
         if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
           refreshUserData(currentUser.id);
         }
-        
-        // Handle path consistency globally - use window.location to escape closure staleness
         if (window.location.pathname === '/' || window.location.pathname === '') {
            navigate('/main', { replace: true });
         }
@@ -167,10 +269,7 @@ export default function MainPage() {
     });
 
     return () => subscription.unsubscribe();
-  }, []); // Shared initialization logic
-
-
-
+  }, [fetchVibes, navigate]);
 
   // [Scroll Lock] Prevent background scroll when any modal is open
   useEffect(() => {
@@ -184,109 +283,23 @@ export default function MainPage() {
     };
   }, [selectedId, showUploadModal]);
 
-  const fetchVibes = async (currentPage = 0, isInitial = true) => {
-    if (isInitial) setIsLoading(true);
-    else setIsFetchingMore(true);
-    
-    // Preparation for parallel processing
-    const start = currentPage * PAGE_SIZE;
-    const end = start + PAGE_SIZE - 1;
-    const today = new Date();
-    // Seed changes every HOUR to shuffle globally across all pages
-    const seed = today.getFullYear() * 1000000 + (today.getMonth() + 1) * 10000 + today.getDate() * 100 + today.getHours();
-
-    try {
-      if (isInitial) {
-        // 🚀 CRITICAL OPTIMIZATION: Combine ALL global initial requests into one Promise.all
-        const [topVibesResult, totalCountResult, vibesResult] = await Promise.all([
-          supabase.from('daily_top_vibes').select('id, title, summary, description, image, tech, link, likes, vibe_date').order('vibe_date', { ascending: false }),
-          supabase.from('vibes').select('id', { count: 'exact', head: true }),
-          supabase.rpc('get_shuffled_vibes', { seed_val: seed }).select('id, title, summary, description, image, tech, link, likes, created_at, user_id').range(start, end)
-        ]);
-          
-        if (topVibesResult.data) {
-          const data = topVibesResult.data as Vibe[];
-          setDailyTopVibes(data);
-          setTopVibeCache(data);
-        }
-        if (totalCountResult.count !== null) {
-          setTotalCount(totalCountResult.count);
-          setTotalCountCache(totalCountResult.count);
-        }
-        
-        const vibesData = vibesResult.data as Vibe[] | null;
-        if (vibesData) {
-          setVibes(vibesData);
-          setPage(0);
-          setHasMore(vibesData.length === PAGE_SIZE);
-          // Persistence to cache
-          setVibeCache(vibesData);
-        }
-      } else {
-        // Background pagination fetch
-        const { data: vibesData } = (await supabase
-          .rpc('get_shuffled_vibes', { seed_val: seed })
-          .select('id, title, summary, description, image, tech, link, likes, created_at, user_id')
-          .range(start, end)) as { data: Vibe[] | null };
-        
-        if (vibesData && Array.isArray(vibesData)) {
-          setVibes(prev => [...prev, ...vibesData]);
-          setHasMore(vibesData.length === PAGE_SIZE);
-          setPage(currentPage);
-        }
-      }
-    } catch (error) {
-      console.error("Vibe sync failed:", error);
-    } finally {
-      if (isInitial) setIsLoading(false);
-      else setIsFetchingMore(false);
-    }
-  };
-
-  const fetchComments = async (vibeId: string) => {
-    // Prevent invalid UUID errors for placeholders or aliases
-    if (!vibeId || vibeId === 'today-project' || vibeId === 'placeholder') return;
-    
-    const { data } = await supabase
-      .from('comments')
-      .select('*')
-      .eq('vibe_id', vibeId)
-      .order('created_at', { ascending: true });
-    
-    if (data) setComments(data);
-  };
-
-  const fetchUserVotes = async (userId: string) => {
-    // Replaced by refreshUserData batch call for efficiency
-    const { data } = await supabase
-      .from('vibe_votes')
-      .select('vibe_id, vote_type')
-      .eq('user_id', userId);
-    
-    if (data) {
-      const votesMap = data.reduce((acc, curr) => {
-        acc[curr.vibe_id] = curr.vote_type;
-        return acc;
-      }, {} as Record<string, 'up' | 'down'>);
-      setUserVotes(votesMap);
-    }
-  };
-
-
+  // Fetch comments when modal opens with a valid vibe
   useEffect(() => {
     if (selectedId && displayVibe && displayVibe.id !== 'placeholder') {
       fetchComments(displayVibe.id);
     } else {
       setComments([]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, displayVibe?.id]);
+  }, [selectedId, displayVibe?.id, fetchComments]);
 
-  const handleAddComment = async (e: React.FormEvent) => {
+  // ═══════════════════════════════════════════════════
+  // 🔥 OPTIMIZATION: All action handlers are useCallback
+  // ═══════════════════════════════════════════════════
+
+  const handleAddComment = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newComment.trim() || !displayVibe || displayVibe.id === 'placeholder') return;
 
-    // Security: Anti-Spam / Rate Limiting (10 seconds between comments)
     const now = Date.now();
     if (now - lastCommentTimeRef.current < 10000 && !isAdmin) {
       toast.error('Please wait 10 seconds before sending another feedback to prevent spam.');
@@ -307,62 +320,22 @@ export default function MainPage() {
       ]);
 
     if (!error) {
+      const trimmedComment = newComment.trim();
       setNewComment("");
-      // Optimistic local append instead of re-fetching
       const newCommentObj: Comment = {
         id: crypto.randomUUID(),
         created_at: new Date().toISOString(),
         vibe_id: displayVibe.id,
         user_id: user.id,
         user_email: user.email ?? 'Anonymous',
-        content: newComment.trim()
+        content: trimmedComment
       };
       setComments(prev => [...prev, newCommentObj]);
     }
     setIsSubmittingComment(false);
-  };
+  }, [user, newComment, displayVibe, isAdmin]);
 
-
-  const handleVote = async (id: string, type: 'up' | 'down') => {
-    if (!user || isVoting) {
-      if (!user) handleLogin();
-      return;
-    }
-
-    const originalVoteType = userVotes[id];
-    setIsVoting(id);
-
-    try {
-      // 1. Optimistic Update UI Immediately
-      if (originalVoteType) {
-        if (originalVoteType === type) {
-          // Cancel
-          setUserVotes(prev => { const n = { ...prev }; delete n[id]; return n; });
-          updateLocalVibeCounts(id, type === 'up' ? { likes: -1 } : { dislikes: -1 });
-          await supabase.from('vibe_votes').delete().eq('vibe_id', id).eq('user_id', user.id);
-        } else {
-          // Swap
-          setUserVotes(prev => ({ ...prev, [id]: type }));
-          updateLocalVibeCounts(id, type === 'up' ? { likes: 1, dislikes: -1 } : { likes: -1, dislikes: 1 });
-          await supabase.from('vibe_votes').update({ vote_type: type }).eq('vibe_id', id).eq('user_id', user.id);
-        }
-      } else {
-        // New vote
-        setUserVotes(prev => ({ ...prev, [id]: type }));
-        updateLocalVibeCounts(id, type === 'up' ? { likes: 1 } : { dislikes: 1 });
-        await supabase.from('vibe_votes').upsert({ vibe_id: id, user_id: user.id, vote_type: type }, { onConflict: 'vibe_id,user_id' });
-      }
-    } catch (e: any) {
-      toast.error('Sync failed: ' + e.message);
-      // Rollback on error
-      fetchUserVotes(user.id);
-      fetchVibes(0, true);
-    } finally {
-      setIsVoting(null);
-    }
-  };
-
-  const updateLocalVibeCounts = (id: string, update: { likes?: number, dislikes?: number }) => {
+  const updateLocalVibeCounts = useCallback((id: string, update: { likes?: number, dislikes?: number }) => {
     const mapVibe = (v: Vibe) => {
       if (v.id !== id) return v;
       return {
@@ -373,12 +346,68 @@ export default function MainPage() {
     };
     setVibes(prev => prev.map(mapVibe));
     setDailyTopVibes(prev => prev.map(mapVibe));
-  };
+  }, []);
 
-  const handleLike = (id: string) => handleVote(id, 'up');
-  const handleDislike = (id: string) => handleVote(id, 'down');
+  const handleVote = useCallback(async (id: string, type: 'up' | 'down') => {
+    if (!user || isVoting) {
+      if (!user) handleLogin();
+      return;
+    }
 
-  const handleOpenMyProject = () => {
+    const originalVoteType = userVotes[id];
+    setIsVoting(id);
+
+    try {
+      if (originalVoteType) {
+        if (originalVoteType === type) {
+          setUserVotes(prev => { const n = { ...prev }; delete n[id]; return n; });
+          updateLocalVibeCounts(id, type === 'up' ? { likes: -1 } : { dislikes: -1 });
+          await supabase.from('vibe_votes').delete().eq('vibe_id', id).eq('user_id', user.id);
+        } else {
+          setUserVotes(prev => ({ ...prev, [id]: type }));
+          updateLocalVibeCounts(id, type === 'up' ? { likes: 1, dislikes: -1 } : { likes: -1, dislikes: 1 });
+          await supabase.from('vibe_votes').update({ vote_type: type }).eq('vibe_id', id).eq('user_id', user.id);
+        }
+      } else {
+        setUserVotes(prev => ({ ...prev, [id]: type }));
+        updateLocalVibeCounts(id, type === 'up' ? { likes: 1 } : { dislikes: 1 });
+        await supabase.from('vibe_votes').upsert({ vibe_id: id, user_id: user.id, vote_type: type }, { onConflict: 'vibe_id,user_id' });
+      }
+    } catch (e: any) {
+      toast.error('Sync failed: ' + e.message);
+      // Rollback: re-fetch from DB
+      const { data } = await supabase.from('vibe_votes').select('vibe_id, vote_type').eq('user_id', user.id);
+      if (data) {
+        const votesMap = data.reduce((acc, curr) => {
+          acc[curr.vibe_id] = curr.vote_type;
+          return acc;
+        }, {} as Record<string, 'up' | 'down'>);
+        setUserVotes(votesMap);
+      }
+      fetchVibes(0, true);
+    } finally {
+      setIsVoting(null);
+    }
+  }, [user, isVoting, userVotes, updateLocalVibeCounts, fetchVibes]);
+
+  const handleLike = useCallback((id: string) => handleVote(id, 'up'), [handleVote]);
+  const handleDislike = useCallback((id: string) => handleVote(id, 'down'), [handleVote]);
+
+  const handleLogin = useCallback(async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  }, []);
+
+  const handleOpenMyProject = useCallback(() => {
     if (!user) return;
     const myProject = vibes.find(v => v.user_id === user.id);
     if (myProject) {
@@ -387,46 +416,26 @@ export default function MainPage() {
     } else {
       toast('You haven\'t uploaded a project yet.', { icon: '📦' });
     }
-  };
+  }, [user, vibes]);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-  };
-
-  const handleLogin = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
-      }
-    });
-  };
-
-  const handleUploadAttempt = async () => {
+  const handleUploadAttempt = useCallback(async () => {
     if (!user) {
       handleLogin();
       return;
     }
     
-    // Admin bypass all restrictions
     if (isAdmin) {
       setShowUploadModal(true);
       return;
     }
 
-    // 1. One project per account check (local state)
     const hasUploaded = vibes.some(v => v.user_id === user.id);
     if (hasUploaded) {
       toast.error('You have already uploaded a project! (Limit: 1 Vibe per account)');
       return;
     }
 
-    // 2. Feedback/Evaluation check
-    // A. Check local votes first (fastest)
     const hasVoted = Object.keys(userVotes).length > 0;
-    
-    // B. Check for comments in the database
     const { count: commentCount } = await supabase
       .from('comments')
       .select('id', { count: 'exact', head: true })
@@ -439,17 +448,15 @@ export default function MainPage() {
       return;
     }
     
-    // Passed all checks
     setShowUploadModal(true);
-  };
+  }, [user, isAdmin, vibes, userVotes, handleLogin]);
 
   const closeUploadModal = useCallback(() => {
     setShowUploadModal(false);
     setEditVibeId(null);
   }, []);
 
-  const handleDeleteVibe = async (vibeId: string, imageUrl: string, ownerId: string) => {
-    // 1. Permission Check
+  const handleDeleteVibe = useCallback(async (vibeId: string, imageUrl: string, ownerId: string) => {
     const isOwner = user && ownerId === user.id;
     if (!isAdmin && !isOwner) {
       toast.error("Access Denied: You don't have permission to delete this project.");
@@ -460,23 +467,20 @@ export default function MainPage() {
 
     setIsDeletingVibe(vibeId);
     try {
-      // 2. Intelligent Bucket and Path Detection from URL
       let filePath = '';
-      let targetBucket = BUCKET_CANDIDATES[0]; // Fallback to primary
+      let targetBucket = BUCKET_CANDIDATES[0];
 
       try {
-        // Standard Supabase URL Format: .../storage/v1/object/public/BUCKET_NAME/USER_ID/FILE_NAME
         const publicUrlIdentifier = '/storage/v1/object/public/';
         if (imageUrl.includes(publicUrlIdentifier)) {
             const pathParts = imageUrl.split(publicUrlIdentifier)[1].split('/');
-            targetBucket = pathParts[0]; // Extracted bucket name (vibe-images, vibe-images2 etc)
-            filePath = pathParts.slice(1).join('/'); // Extracted user_id/file.webp
+            targetBucket = pathParts[0];
+            filePath = pathParts.slice(1).join('/');
         }
       } catch(e) {
           console.error("URL parsing fail:", e);
       }
 
-      // 3. Delete from DB (FK dependencies must be handled by CASCADE in PG)
       const { error: dbError } = await supabase
         .from('vibes')
         .delete()
@@ -486,18 +490,15 @@ export default function MainPage() {
         throw new Error(`Database error: ${dbError.message} (${dbError.code})`);
       }
 
-      // 4. Cleanup image file from the correctly identified bucket
       if (filePath) {
         const { error: storageError } = await supabase.storage.from(targetBucket).remove([filePath]);
         if (storageError) console.error(`Storage cleanup failed in [${targetBucket}]`, storageError);
       }
 
-      // 5. Success: Clean up UI state
       setSelectedId(null);
       setIsTodayProjectModal(false);
       setHistoryOffset(0);
       
-      // Refresh the entire list (Page 0, Initial=true)
       await fetchVibes(0, true);
       toast.success('Project successfully removed from gallery.');
     } catch (error: any) {
@@ -506,7 +507,7 @@ export default function MainPage() {
     } finally {
       setIsDeletingVibe(null);
     }
-  };
+  }, [user, isAdmin, fetchVibes]);
 
   const handleEditVibe = useCallback((vibe: Vibe) => {
     const vibeData = { ...vibe };
@@ -530,31 +531,15 @@ export default function MainPage() {
     }, 250);
   }, []);
 
+  // 🔥 OPTIMIZATION: Stable callback for onPublishSuccess to avoid UploadModal re-render
+  const handlePublishSuccess = useCallback(() => fetchVibes(0, true), [fetchVibes]);
+
+  // 🔥 OPTIMIZATION: Stable callback for loadMore to avoid button re-render
+  const handleLoadMore = useCallback(() => fetchVibes(page + 1, false), [fetchVibes, page]);
 
   return (
     <div className="min-h-screen p-8 lg:p-16">
-      <Toaster 
-        position="bottom-right"
-        toastOptions={{
-          duration: 3500,
-          style: {
-            background: '#1a1a2e',
-            color: '#e0e0e0',
-            border: '1px solid rgba(139, 92, 246, 0.3)',
-            borderRadius: '12px',
-            fontSize: '13px',
-            fontWeight: '600',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 20px rgba(139,92,246,0.15)',
-            backdropFilter: 'blur(12px)',
-          },
-          success: {
-            iconTheme: { primary: '#8b5cf6', secondary: '#fff' },
-          },
-          error: {
-            iconTheme: { primary: '#ef4444', secondary: '#fff' },
-          },
-        }}
-      />
+      <Toaster position="bottom-right" toastOptions={TOAST_OPTIONS} />
       <div className="bg-mesh" />
       
       {/* Navigation */}
@@ -595,8 +580,6 @@ export default function MainPage() {
               <span className="hidden sm:inline">LOGIN</span>
               <span className="sm:hidden text-[9px]">LOGIN</span>
             </button>
-
-
           )}
         </div>
       </nav>
@@ -672,7 +655,7 @@ export default function MainPage() {
         </motion.div>
       </div>
 
-            {/* Gallery Grid Section Header */}
+      {/* Gallery Grid Section Header */}
       {!isLoading && (
         <div className="mb-6 flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
@@ -686,15 +669,7 @@ export default function MainPage() {
 
       {/* Gallery Grid */}
       <motion.div 
-        variants={{
-          hidden: { opacity: 0 },
-          show: {
-            opacity: 1,
-            transition: {
-              staggerChildren: 0.05
-            }
-          }
-        }}
+        variants={GRID_VARIANTS}
         initial="hidden"
         animate="show"
         className={cn(
@@ -702,7 +677,6 @@ export default function MainPage() {
           "w-full"
         )}
       >
-        {/* Upload Card */}
         {isLoading ? (
           <div className="col-span-full py-40 flex flex-col items-center justify-center gap-8">
              <div className="relative">
@@ -727,10 +701,7 @@ export default function MainPage() {
         ) : (
           <>
             <motion.div 
-              variants={{
-                hidden: { opacity: 0, scale: 0.8 },
-                show: { opacity: 1, scale: 1 }
-              }}
+              variants={CARD_VARIANTS}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={handleUploadAttempt}
@@ -762,7 +733,7 @@ export default function MainPage() {
       {hasMore && !isLoading && (
         <div className="flex justify-center mt-12 mb-8">
           <button
-            onClick={() => fetchVibes(page + 1, false)}
+            onClick={handleLoadMore}
             disabled={isFetchingMore}
             className="flex items-center gap-2 px-8 py-3 rounded-full border border-vibe-accent/30 text-vibe-accent font-bold uppercase tracking-widest text-xs hover:bg-vibe-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(139,92,246,0.1)]"
           >
@@ -809,7 +780,7 @@ export default function MainPage() {
         isAdmin={isAdmin}
         editVibeId={editVibeId}
         handleLogin={handleLogin}
-        onPublishSuccess={() => fetchVibes(0, true)}
+        onPublishSuccess={handlePublishSuccess}
       />
 
       {/* Footer */}
