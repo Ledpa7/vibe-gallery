@@ -25,3 +25,26 @@ export interface Comment {
   user_email: string;
   content: string;
 }
+
+// Community Forum Types
+export interface CommunityPost {
+  id: string;
+  created_at: string;
+  title: string;
+  content: string;
+  category: string;
+  user_id: string;
+  user_email: string;
+  user_avatar?: string;
+  upvotes: number;
+  comment_count: number;
+}
+
+export interface PostComment {
+  id: string;
+  created_at: string;
+  post_id: string;
+  user_id: string;
+  user_email: string;
+  content: string;
+}

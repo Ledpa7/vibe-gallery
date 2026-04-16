@@ -10,7 +10,6 @@ import imageCompression from 'browser-image-compression';
 import { toast } from 'react-hot-toast';
 
 import { supabase } from '../lib/supabase';
-import { cn } from '../lib/cn';
 import { generateCroppedBlob, createProportionalPaddedCanvas } from '../lib/imageUtils';
 import type { User } from '@supabase/supabase-js';
 
