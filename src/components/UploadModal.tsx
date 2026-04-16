@@ -64,6 +64,19 @@ export default function UploadModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Security: Validate file type and size
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast.error('Only JPG, PNG, WebP, or GIF images are allowed.');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File size must be under 10MB.');
+      e.target.value = '';
+      return;
+    }
+
     setIsProcessingImage(true);
     const options = {
       maxSizeMB: 2,
