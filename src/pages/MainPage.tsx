@@ -15,6 +15,7 @@ import { getCache, isCacheFresh, setVibeCache, setTopVibeCache, setTotalCountCac
 import VibeCard from '../components/VibeCard';
 import DetailModal from '../components/DetailModal';
 import UploadModal from '../components/UploadModal';
+import Avatar from '../components/Avatar';
 
 // Storage Settings: Support multiple buckets for 50MB-per-bucket free tier bypass
 const BUCKET_CANDIDATES = ['vibe-images', 'vibe-images2'];
@@ -564,12 +565,12 @@ export default function MainPage() {
                   )}
                 </div>
               </div>
-              <img 
-                src={user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`} 
+              <Avatar 
+                src={user.user_metadata.avatar_url} 
+                seed={user.email || user.id}
                 className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-vibe-accent/30 shadow-[0_0_15px_rgba(139,92,246,0.3)] object-cover cursor-pointer hover:scale-110 active:scale-95 transition-all" 
                 onClick={handleOpenMyProject}
                 title="My Project"
-                alt="P" 
               />
               <button onClick={handleLogout} className="p-2 sm:p-2 text-gray-500 hover:text-white transition-colors" title="Logout"><LogOut size={18} className="sm:w-3.5 sm:h-3.5" /></button>
             </div>

@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabase';
 import { type User } from '@supabase/supabase-js';
 import { cn } from '../lib/cn';
 import type { CommunityPost } from '../lib/types';
+import Avatar from '../components/Avatar';
 
 const CATEGORIES = [
   { id: 'all', label: 'All Threads', icon: MessageSquare, color: 'text-white' },
@@ -246,7 +247,11 @@ export default function CommunityPage() {
                 <p className="text-[10px] font-black italic text-vibe-accent uppercase tracking-[0.2em] leading-tight">Vibe Coder</p>
                 {user.user_metadata.full_name && <p className="text-xs font-bold text-gray-300 leading-tight">{user.user_metadata.full_name}</p>}
               </div>
-              <img src={user.user_metadata.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-vibe-accent/30 object-cover" alt="Avatar" />
+              <Avatar 
+                src={user.user_metadata.avatar_url} 
+                seed={user.email || user.id} 
+                className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-vibe-accent/30 object-cover" 
+              />
               <button onClick={handleLogout} className="p-2 text-gray-500 hover:text-white transition-colors" title="Logout"><LogOut size={18} /></button>
             </div>
           ) : (
@@ -377,7 +382,11 @@ export default function CommunityPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2">
-                            <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.user_id}`} className="w-5 h-5 rounded-full border border-white/10" alt="" />
+                            <Avatar 
+                              src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${post.user_id}`} 
+                              seed={post.user_id} 
+                              className="w-5 h-5 rounded-full border border-white/10" 
+                            />
                             <span className="text-[11px] text-gray-500 font-medium truncate">{post.user_email.split('@')[0]}</span>
                             <span className="text-[10px] text-gray-700">·</span>
                             <span className="text-[11px] text-gray-600">{timeAgo(post.created_at)}</span>
