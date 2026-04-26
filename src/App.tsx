@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import MainPage from './pages/MainPage';
+import CommunityPage from './pages/CommunityPage';
 import PrivacyPage from './pages/PrivacyPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ExternalLink, X, Share, Compass } from 'lucide-react';
@@ -109,6 +110,9 @@ export default function App() {
         
         {/* Individual Privacy Policy Page */}
         <Route path="/privacy" element={<PrivacyPage />} />
+
+        {/* 💬 Community Threads */}
+        <Route path="/community" element={<CommunityPage />} />
         
         {/* 404 Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  Plus, HelpCircle, LogOut, Loader2
+  Plus, HelpCircle, LogOut, Loader2, MessageSquare
 } from 'lucide-react';
 
 import { supabase } from '../lib/supabase';
@@ -553,6 +553,13 @@ export default function MainPage() {
           <h1 className="text-xl md:text-2xl font-black tracking-tighter hidden sm:block">
             VIBE <span className="text-vibe-accent">GALLERY</span>
           </h1>
+          <button 
+            onClick={() => navigate('/community')}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest text-vibe-accent bg-vibe-accent/10 border border-vibe-accent/20 ml-2 hover:bg-vibe-accent/20 transition-all active:scale-95"
+          >
+            <MessageSquare size={13} />
+            <span className="hidden md:inline">Community</span>
+          </button>
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
           {user ? (

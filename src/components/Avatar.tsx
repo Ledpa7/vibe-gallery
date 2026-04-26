@@ -26,6 +26,7 @@ export default function Avatar({ src, seed, className, onClick, title }: AvatarP
       onClick={onClick}
       title={title}
       alt="Avatar"
+      referrerPolicy="no-referrer"
     />
   );
 }
