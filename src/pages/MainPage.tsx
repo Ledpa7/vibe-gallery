@@ -86,10 +86,16 @@ export default function MainPage() {
   const [editVibeId, setEditVibeId] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   
-  // Pagination State
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  // ═══════════════════════════════════════════════════
+  // 🚀 OPTIMIZATION: Memory Cache for Comments
+  //    Prevents redundant DB calls when opening the same modal
+  // ═══════════════════════════════════════════════════
+  const commentsCacheRef = useRef<Record<string, { data: Comment[], timestamp: number }>>({});
+  const COMMENT_CACHE_TTL = 1000 * 60 * 2; // 2 minutes
 
   // ═══════════════════════════════════════════════════
   // 🔥 OPTIMIZATION: All handlers wrapped in useCallback
@@ -203,13 +209,28 @@ export default function MainPage() {
   const fetchComments = useCallback(async (vibeId: string) => {
     if (!vibeId || vibeId === 'today-project' || vibeId === 'placeholder') return;
     
+    // Check Cache First
+    const cached = commentsCacheRef.current[vibeId];
+    if (cached && (Date.now() - cached.timestamp < COMMENT_CACHE_TTL)) {
+      setComments(cached.data);
+      return;
+    }
+
     const { data } = await supabase
       .from('comments')
       .select('*')
       .eq('vibe_id', vibeId)
       .order('created_at', { ascending: true });
     
-    if (data) setComments(data);
+    if (data) {
+      const commentData = data as Comment[];
+      setComments(commentData);
+      // Update Cache
+      commentsCacheRef.current[vibeId] = {
+        data: commentData,
+        timestamp: Date.now()
+      };
+    }
   }, []);
 
   // ═══════════════════════════════════════════════════
@@ -229,12 +250,17 @@ export default function MainPage() {
 
     const refreshUserData = async (userId: string) => {
       try {
+        // 🚀 OPTIMIZATION: Check session cache first for admin status
+        const cachedAdmin = sessionStorage.getItem(`vibe_admin_${userId}`);
+        
         const [adminResult, votesResult] = await Promise.all([
-          supabase.from('profiles').select('role').eq('id', userId).single(),
+          cachedAdmin ? Promise.resolve({ data: { role: cachedAdmin } }) : supabase.from('profiles').select('role').eq('id', userId).single(),
           supabase.from('vibe_votes').select('vibe_id, vote_type').eq('user_id', userId)
         ]);
 
-        setIsAdmin(adminResult.data?.role === 'admin');
+        const role = adminResult.data?.role;
+        setIsAdmin(role === 'admin');
+        if (role) sessionStorage.setItem(`vibe_admin_${userId}`, role);
         
         if (votesResult.data) {
           const votesMap = votesResult.data.reduce((acc, curr) => {
@@ -244,7 +270,7 @@ export default function MainPage() {
           setUserVotes(votesMap);
         }
       } catch (err) {
-        console.warn("Profile fetch skipped for session initialization");
+        console.warn("Profile fetch skipped or failed:", err);
         setIsAdmin(false);
       }
     };
@@ -331,7 +357,16 @@ export default function MainPage() {
         user_email: user.email ?? 'Anonymous',
         content: trimmedComment
       };
-      setComments(prev => [...prev, newCommentObj]);
+      
+      setComments(prev => {
+        const updated = [...prev, newCommentObj];
+        // 🚀 OPTIMIZATION: Update cache immediately so it's reflected when re-opening
+        commentsCacheRef.current[displayVibe.id] = {
+          data: updated,
+          timestamp: Date.now()
+        };
+        return updated;
+      });
     }
     setIsSubmittingComment(false);
   }, [user, newComment, displayVibe, isAdmin]);
